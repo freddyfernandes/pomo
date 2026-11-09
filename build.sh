@@ -15,7 +15,7 @@ case "${1:-}" in
   --login) osascript -e "tell application \"System Events\" to delete login item \"Pomo\"" >/dev/null 2>&1 || true ;;
 esac
 if [ ! -x "$BIN" ] || [ Pomo.swift -nt "$BIN" ]; then
-  mkdir -p "$APP/Contents/MacOS"
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
   swiftc -O -module-cache-path ./.cache Pomo.swift -o "$BIN"
   cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,8 +26,10 @@ if [ ! -x "$BIN" ] || [ Pomo.swift -nt "$BIN" ]; then
   <key>CFBundleExecutable</key><string>Pomo</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSUIElement</key><true/>
+  <key>CFBundleIconFile</key><string>Pomo</string>
 </dict></plist>
 PLIST
+  cp assets/icon.icns "$APP/Contents/Resources/Pomo.icns"
 fi
 [ "${1:-}" = "--once" ] && exit 0
 if [ "${1:-}" = "--pin" ]; then
