@@ -30,6 +30,7 @@ let checks = #"""
     d.preset(25)
     check(d.focusMinutes == 25 && d.clock.stringValue.hasPrefix("25:00"), "25 min preset on the clock")
     d.autoFocus = true
+    d.doneBlock = false; d.runningBreak = false // fresh focus block
     d.toggle()
     check(d.running && !d.runningBreak, "Start runs a focus block")
     let held = Int(d.end.timeIntervalSinceNow.rounded(.up))
@@ -49,7 +50,22 @@ let checks = #"""
     d.refresh() // break ends -> next focus
     check(d.running && !d.runningBreak && Int(d.end.timeIntervalSinceNow.rounded()) == 25 * 60, "break end auto-starts the next 25 min focus")
     d.autoFocus = false
-    print("all to-do and timer checks passed")
+    // Time-left strip: full when idle, eases to the fraction of time left, orange in focus.
+    // (Driven directly: the end-of-block branch above leaves a chained break running.)
+    d.bar.setFraction(1, running: false)
+    check(abs(d.bar.frame.width - C.width) < 1 && d.bar.fractionValue == 1, "strip spans the panel when idle")
+    d.bar.colour = C.accent
+    d.bar.setFraction(0.4, running: true)
+    check(d.bar.fractionValue == 0.4 && d.bar.colour == C.accent, "strip target + colour set at 40% left")
+    for _ in 0..<10 { RunLoop.main.run(until: Date().addingTimeInterval(0.1)) }
+    check(d.bar.animating, "the ease timer is running after a new target")
+    check(d.bar.animStart != nil && abs(d.bar.animStart! - 1) < 0.001, "the ease starts from the drawn value")
+    d.bar.setFraction(0.4, running: true) // fresh ease, same clock start as the check below
+    let v = d.bar.onTick(0.5)
+    check(abs(v - 0.4) < 0.01, "after 0.5s of ease the strip is at 40% (own=\(d.bar.shownValue) d=\(d.bar.fractionValue))")
+    d.bar.setFraction(0, running: false)
+    check(d.bar.shownValue == 0, "stopping snaps the strip")
+    print("all to-do, timer and strip checks passed")
     exit(0)
 """#
 

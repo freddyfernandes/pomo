@@ -157,6 +157,64 @@ final class TodoRow: NSControl {
 
 final class Flipped: NSView { override var isFlipped: Bool { true } }
 
+// Time-left strip: full width when idle, then shrinks symmetrically toward the centre as the block runs out.
+// Width changes are eased with a short implicit animation so the ticks look like a gentle drain, not steps.
+final class DrainBar: NSView {
+    var trackWidth: CGFloat = 236
+    var colour = C.accent { didSet { needsDisplay = true } }
+    private(set) var fractionValue: CGFloat = 1 // 1 = full time left
+    var shownValue: CGFloat { shown }
+    private var shown: CGFloat = 1 // what is drawn now
+    private var from: CGFloat = 1 // where the current ease began
+    private var start = Date()
+    private var anim: Timer?
+    private let ease: TimeInterval = 0.5
+
+    override var isFlipped: Bool { false }
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { false }
+    // Fixed full-panel track; the strip is drawn inside it, so the stack never resizes it.
+    override var intrinsicContentSize: NSSize { NSSize(width: trackWidth, height: 3) }
+
+    // Each target starts a short ease from whatever is on screen, so once a second the orange slides inward.
+    // If an ease is already running it simply continues toward the newest target.
+    func setFraction(_ f: CGFloat, running: Bool) {
+        fractionValue = f
+        guard running else { anim?.invalidate(); anim = nil; shown = f; needsDisplay = true; return }
+        if anim == nil {
+            from = shown
+            start = Date()
+            anim = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.step() }
+            }
+        }
+    }
+
+    private func step() {
+        let t = min(1, Date().timeIntervalSince(start) / ease)
+        let e = t * t * (3 - 2 * t) // smoothstep
+        shown = from + (fractionValue - from) * e
+        needsDisplay = true
+        if t >= 1 { anim?.invalidate(); anim = nil }
+    }
+
+    // Test hooks: drive the ease without depending on runloop timing.
+    var animating: Bool { anim != nil }
+    var animStart: CGFloat? { from }
+    @discardableResult func onTick(_ advance: TimeInterval) -> CGFloat {
+        start = start.addingTimeInterval(-advance)
+        step()
+        return shown
+    }
+
+    override func draw(_ rect: NSRect) {
+        C.hairline.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 1.5, yRadius: 1.5).fill()
+        let w = max(0.5, bounds.width * shown) // a hair of colour remains at 00:00
+        colour.setFill()
+        NSBezierPath(roundedRect: NSRect(x: (bounds.width - w) / 2, y: 0, width: w, height: bounds.height), xRadius: 1.5, yRadius: 1.5).fill()
+    }
+}
+
 // The themed POMO wordmark: display-weight rounded letters, each one its own click target.
 final class Wordmark: NSView {
     struct State { var running = false; var isBreak = false; var minutes = 25 }
@@ -420,15 +478,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        // 1. progress bar across the top
-        let bar = NSBox()
-        bar.boxType = .custom
-        bar.fillColor = C.accent
-        bar.borderWidth = 0
-        bar.heightAnchor.constraint(equalToConstant: 3).isActive = true
-        bar.widthAnchor.constraint(equalToConstant: C.width).isActive = true
+        // 1. time-left strip across the top: it drains from both ends toward the centre as the block runs out
+        bar.trackWidth = C.width
+        bar.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(bar)
-        self.bar = bar
 
         // 2. the timer: big plain digits (no tint, no box), the POMO wordmark under them, and the state word.
         //    Click the clock to start/pause. ▲▼ appear only when the pointer comes near.
@@ -527,7 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         ])
         rebuildList()
     }
-    var bar: NSBox!
+    let bar = DrainBar() // animated time-left strip
     let stateLabel = NSTextField(labelWithString: "")
     let mark = Wordmark() // POMO under the clock, each letter a length toggle
 
@@ -727,37 +780,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         let active = clock.currentEditor()
         let textOwnedByEditor = active != nil && panel.firstResponder === clock
         if !textOwnedByEditor { clock.stringValue = text }
-        clock.textColor = typing ? C.accent : runningBreak ? C.green : running ? C.text : C.text
+        clock.textColor = runningBreak ? C.green : C.text
         stateLabel.stringValue = (running ? (runningBreak ? "break" : "pomo") : paused > 0 ? "paused" : doneBlock ? "break ready" : "start")
             + (autoFocus ? " · auto" : "")
-        stateLabel.textColor = runningBreak ? C.green : running ? C.accent : paused > 0 ? C.accent : C.faint
+        stateLabel.textColor = runningBreak ? C.green : running || paused > 0 ? C.accent : C.faint
         mark.state = Wordmark.State(running: running, isBreak: runningBreak, minutes: doneBlock ? breakMinutes : focusMinutes)
         setDimmed(running && !runningBreak) // focus: the list steps back, the clock is the only bright thing
-        statusMenu() // menu bar item mirrors the same state (text only, once a second or less)
+        // Time-left strip, updated before the end-of-block handoff below starts the next phase in this same pass.
+        bar.colour = runningBreak ? C.green : C.accent
+        bar.alphaValue = running ? 1 : 0.35
+        bar.setFraction(running && total > 0 ? CGFloat(max(0, min(1, Double(left) / total))) : running ? 0 : 1, running: running)
+        statusMenu() // menu bar item mirrors the same state
         for b in [up, down] { b.fill = running ? C.bg : C.card } // greyed while running
-        let fraction = running && total > 0 ? max(0, min(1, Double(left) / total)) : (running ? 0 : 1)
-        bar.fillColor = runningBreak ? C.green : C.accent
-        bar.alphaValue = running ? 1 : 0.25
-        barWidth.constant = CGFloat(fraction) * CGFloat(C.width)
-        // A finished countdown: react once. Set a used-up marker, not just "not running"; every refresh would
-        // otherwise re-trigger the auto rhythm (focus end -> break -> new 25 min block) and restart the cycle.
+        // A finished countdown: react once, and mark it used up (otherwise every tick re-triggers the auto rhythm).
         if running && end <= Date() {
             running = false
             end = .distantPast
             let wasFocus = !runningBreak
             doneBlock = wasFocus // next start = break; after the break, next start = focus again
             if wasFocus { cycle += 1; store.set(cycle, forKey: cycleKey) }
-            // Automatic rhythm: focus ends -> break starts; break ends -> next focus starts. Until you press stop.
-            if !runningBreak { workingBreak = breakMinutes } // a cycle that didn't come from a Start still uses the chosen break
+            if !runningBreak { workingBreak = breakMinutes } // a block that didn't come from a Start still uses the chosen break
             if wasFocus && autoFocus { startBreak(); chime("Time's up — \(workingBreak) min break") }
             else if !wasFocus && autoFocus { toggle(); chime("Break over — \(focusMinutes) min focus") }
             else { chime(wasFocus ? "Time's up — take a break" : "Break over") }
             refresh()
         }
     }
-    lazy var barWidth: NSLayoutConstraint = { let c = bar.widthAnchor.constraint(equalToConstant: C.width); c.isActive = true; return c }()
 
-    // A chime and a small banner from the menu bar icon (macOS may ask for notification permission once).
     func chime(_ message: String) {
         NSSound(named: runningBreak ? "Glass" : "Morse")?.play()
         let n = NSUserNotification()
