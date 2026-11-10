@@ -2,6 +2,8 @@
 
 A minimal always-on-top pomodoro and checklist for macOS. One Swift file, AppKit only, no dependencies.
 
+<img width="325" height="450" alt="image" src="https://github.com/user-attachments/assets/e826ab18-9bb5-4302-9d29-4213ad141b05" />
+
 ## Use
 
 - Click the clock to start, pause or resume. ⌥-click restarts.
