@@ -390,6 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         store.removeObject(forKey: "todos")
 
         buildUI()
+        listHeight.constant = CGFloat(max(rows, items.count, showStats ? 1 : 0)) * C.row // fit the real list at once
         autoHeight()
         if let s = NSScreen.main?.visibleFrame {
             panel.setFrameTopLeftPoint(NSPoint(x: s.maxX - panel.frame.width - 12, y: s.maxY - 12)) // top-right corner
@@ -611,8 +612,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         let content = panel.contentView!
         content.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 4),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 4), // nothing may sit above the strip
             stack.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -10),
+            stack.heightAnchor.constraint(greaterThanOrEqualToConstant: 200), // never let the window shrink past the clock
         ])
         rebuildList()
     }
@@ -628,7 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         if listHeight.constant != CGFloat(wanted) * C.row { listHeight.constant = CGFloat(wanted) * C.row }
         let content = panel.contentView!
         content.layoutSubtreeIfNeeded()
-        let height = stack.frame.height + stack.frame.minY + 10
+        let height = max(stack.frame.height, 200) + 14 // stack's top inset + a small bottom margin
         let top = panel.frame.maxY
         guard abs(panel.contentLayoutRect.height - height) > 0.5 else { return }
         panel.setContentSize(NSSize(width: content.frame.width, height: height))
