@@ -83,6 +83,10 @@ let checks = #"""
     check((d.day["minutes"] as? Int ?? 0) >= 25, "focus minutes banked (\(d.day["minutes"] ?? 0))")
     if !d.showStats { d.toggleStats() }
     check(!d.statsWrap.isHidden && d.statsLine.stringValue.contains("pomo") && d.statsLine.stringValue.contains("done"), "stats line reads: \(d.statsLine.stringValue)")
+    check((d.day["pomos"] as? Int ?? 0) > 0 && (d.day["done"] as? Int ?? 0) > 0, "stats non-zero before reset")
+    d.resetDay()
+    check(d.day.isEmpty && d.store.object(forKey: d.dayKey) == nil, "reset clears today's tally (and its saved key)")
+    check(d.statsLine.stringValue == "0 pomos · 0m focus · 0 done", "stats line zeroed: \(d.statsLine.stringValue)")
     d.toggleStats()
     check(d.statsWrap.isHidden, "clicking the footer again hides it")
     print("all to-do, timer, strip and stats checks passed")

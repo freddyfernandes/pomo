@@ -17,6 +17,7 @@ A tiny always-on-top pomodoro + checklist for macOS. One Swift file, AppKit only
 - **Today's tally** (hidden): click the footer line under the list to show/hide
   `2 pomos · 50m focus · 3 done`. Counts finished focus blocks, minutes actually focused (live while running)
   and to-dos ticked today; resets at midnight. The choice is remembered.
+  Reset it early from the menu bar: **POMO ⌄ → Reset today's stats** (asks once).
 
 ## Run it locally
 

@@ -705,6 +705,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         autoHeight()
     }
 
+    // Clears only today's tally; the running block keeps its minutes from now on.
+    func resetDay() {
+        day = [:]
+        focusStarted = running && !runningBreak ? Date() : .distantPast
+        store.removeObject(forKey: dayKey)
+        updateStats()
+    }
+
     func bump(_ key: String, _ by: Int) {
         day[key] = (day[key] as? Int ?? 0) + by
         store.set(day, forKey: dayKey)
@@ -991,6 +999,7 @@ final class MenuBar: NSObject, NSApplicationDelegate {
     let pinItem = NSMenuItem(title: "Show countdown", action: #selector(togglePin), keyEquivalent: "")
     let autoItem = NSMenuItem(title: "Automatic rhythm", action: #selector(toggleAuto), keyEquivalent: "")
     let showItem = NSMenuItem(title: "Show Pomo", action: #selector(show), keyEquivalent: "")
+    let resetItem = NSMenuItem(title: "Reset today's stats", action: #selector(resetStats), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_: Notification) {
         guard let button = item.button else { return }
@@ -1009,7 +1018,8 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         pinItem.target = self
         autoItem.target = self
         showItem.target = self
-        for m in [clockItem, toggleItem, .separator(), pinItem as NSMenuItem, autoItem, .separator(), showItem,
+        resetItem.target = self
+        for m in [clockItem, toggleItem, .separator(), pinItem as NSMenuItem, autoItem, resetItem, .separator(), showItem,
                   NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")] {
             menu.addItem(m)
         }
@@ -1046,6 +1056,19 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         d.setPinned(!d.pinnedCountdown)
     }
     @objc func show() { (NSApp.delegate as? AppDelegate)?.showPanel() }
+
+    // Stats: "Reset today's stats" clears the tally after a one-click confirmation.
+    @objc func resetStats() {
+        guard let d = NSApp.delegate as? AppDelegate else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Reset today's stats?"
+        alert.informativeText = "Clears today's pomos, focus minutes and done count. The to-do list is untouched."
+        alert.addButton(withTitle: "Reset")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        d.resetDay()
+    }
 }
 
 // The wordmark, drawn: P O M O each 14pt wide, then a dot that opens the menu. Selected letter is accented;
