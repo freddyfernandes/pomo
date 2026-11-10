@@ -157,6 +157,16 @@ final class TodoRow: NSControl {
 
 final class Flipped: NSView { override var isFlipped: Bool { true } }
 
+// Footer row: the whole strip is clickable (toggles today's stats); the Clear button on top still gets its clicks.
+final class FooterRow: NSView {
+    var onClick: (() -> Void)?
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
+    override func mouseDown(with e: NSEvent) {
+        guard !(hitTest(convert(e.locationInWindow, from: nil)) is NSButton) else { return }
+        onClick?()
+    }
+}
+
 // Time-left strip: full width when idle, then shrinks symmetrically toward the centre as the block runs out.
 // Width changes are eased with a short implicit animation so the ticks look like a gentle drain, not steps.
 final class DrainBar: NSView {
@@ -304,8 +314,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         return saved.isEmpty ? [25, 5, 60] : saved
     }
     var autoFocus = false // auto breaks + next focus; loaded at launch
-    var cycle = 0 // completed focus blocks today
+    var cycle = 0 // completed focus blocks today (kept for older saved data)
+    // Today's tally: finished focus blocks, minutes actually focused in the current block, and to-dos ticked.
+    // Stored under a per-day key so midnight starts fresh without any timer.
+    var day: [String: Any] = [:]
+    var dayKey: String { "day:" + String(Calendar.current.startOfDay(for: Date()).description.prefix(10)) }
     var cycleKey: String { "cycle:" + String(Calendar.current.startOfDay(for: Date()).description.prefix(10)) }
+    var focusStarted = Date.distantPast // when the current focus block started (for live minutes)
+    var shownDayKey = "" // the day the HUD currently shows
     var runningBreak = false
     var pausedBreak = false // the paused time is a break, not focus
     var history: [Int] = [] // sort order for right-click "Pinned to menu bar": most recently shown first
@@ -377,6 +393,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         if pinnedCountdown { handOver() } // replace the old copy, keep its countdown
         autoFocus = store.bool(forKey: "auto")
         cycle = store.integer(forKey: cycleKey)
+        day = (store.dictionary(forKey: dayKey) ?? [:])
+        day["done"] = day["done"] as? Int ?? 0
         let savedBreak = Int(store.double(forKey: "break"))
         breakMinutes = (1...60).contains(savedBreak) ? savedBreak : 5
         paused = store.double(forKey: "paused")
@@ -433,6 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
         quitting = true
         store.set(cycle, forKey: cycleKey)
+        store.set(day, forKey: dayKey)
         store.set(autoFocus, forKey: "auto")
         if pinnedCountdown && running {
             store.set(Date(timeIntervalSinceNow: end.timeIntervalSinceNow), forKey: "handoffEnd")
@@ -558,19 +577,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         listHeight.isActive = true // after the list is in the stack, matching layout order
         stack.setCustomSpacing(6, after: list)
 
-        // 5. footer: progress count on the left, Clear completed on the right
+        // 5. footer: the tally line on the left (it is also the toggle for today's numbers), Clear completed right
         foot.orientation = .horizontal
         foot.alignment = .centerY
         foot.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
         leftLbl.font = .systemFont(ofSize: 10)
         leftLbl.textColor = C.faint
+        leftLbl.isSelectable = false
         foot.addArrangedSubview(leftLbl)
         foot.addArrangedSubview(NSView()) // spring: pushes the button right
         clearBtn.action = #selector(clearDone)
         clearBtn.target = self
         foot.addArrangedSubview(clearBtn)
+        foot.translatesAutoresizingMaskIntoConstraints = false
         clearBtn.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(foot)
+        // Click anywhere on the footer row (except the button itself) to show/hide today's stats.
+        let footRow = FooterRow() // plain view: whole row is a click target
+        footRow.onClick = { [weak self] in self?.toggleStats() }
+        footRow.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
+        footRow.addSubview(foot)
+        NSLayoutConstraint.activate([
+            foot.leadingAnchor.constraint(equalTo: footRow.leadingAnchor),
+            foot.trailingAnchor.constraint(equalTo: footRow.trailingAnchor),
+            foot.centerYAnchor.constraint(equalTo: footRow.centerYAnchor),
+        ])
+        stack.addArrangedSubview(footRow)
+
+        // today's numbers: hidden until the footer is clicked, remembered
+        statsWrap.orientation = .horizontal
+        statsWrap.alignment = .centerX
+        statsWrap.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
+        statsWrap.addArrangedSubview(statsLine)
+        statsWrap.isHidden = !showStats
+        stack.addArrangedSubview(statsWrap)
 
         let content = panel.contentView!
         content.addSubview(stack)
@@ -642,6 +681,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
             listHost.addArrangedSubview(row)
         }
         updateFooter()
+        updateStats()
         sizeListContent()
         autoHeight()
     }
@@ -654,9 +694,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         clearBtn.isHidden = doneCount == 0
     }
 
+    // MARK: today's hidden stats
+    let statsWrap = NSStackView() // today's numbers, hidden until the footer line is clicked
+    let statsLine = NSTextField(labelWithString: "")
+
+    var showStats = UserDefaults.standard.bool(forKey: "showStats") // remembered, hidden by default
+
+    @objc func toggleStats() {
+        showStats.toggle()
+        UserDefaults.standard.set(showStats, forKey: "showStats")
+        updateStats()
+        statsWrap.isHidden = !showStats
+        autoHeight()
+    }
+
+    func bump(_ key: String, _ by: Int) {
+        day[key] = (day[key] as? Int ?? 0) + by
+        store.set(day, forKey: dayKey)
+    }
+
+    // "2 pomos · 52 min focus · 3 done today" — minutes include the block running right now.
+    func updateStats() {
+        guard showStats else { return }
+        if shownDayKey != dayKey { // midnight passed since the line was last drawn
+            shownDayKey = dayKey
+            day = store.dictionary(forKey: dayKey) ?? [:]
+        }
+        let pomos = day["pomos"] as? Int ?? 0
+        var minutes = day["minutes"] as? Int ?? 0
+        if running && !runningBreak && focusStarted != .distantPast { minutes += Int(Date().timeIntervalSince(focusStarted) / 60) }
+        let ticked = day["done"] as? Int ?? 0
+        let time = minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+        statsLine.attributedStringValue = NSAttributedString(string: "\(pomos) pomo\(pomos == 1 ? "" : "s") · \(time) focus · \(ticked) done", attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .medium),
+            .foregroundColor: C.faint,
+        ])
+    }
+
     func toggleItem(_ id: Int) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         items[i].done = !items[i].done
+        if items[i].done { bump("done", 1) } // today's tally: each tick counts once
         saveItems()
         rebuildList()
     }
@@ -743,6 +821,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         running = true
         let seconds = paused > 0 ? paused : (runningBreak ? Double(workingBreak > 0 ? workingBreak : breakMinutes) * 60 : TimeInterval(focusMinutes * 60))
         if !runningBreak && paused == 0 { workingBreak = breakMinutes } // freeze this cycle's break length at start
+        if !runningBreak { focusStarted = Date() } // used for the live "min focus" in the stats line
         end = Date().addingTimeInterval(seconds)
         paused = 0
         store.removeObject(forKey: "paused")
@@ -753,6 +832,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
     func pause() {
         guard running else { return }
+        bankFocus() // minutes run so far count toward today even while paused
         keepPause = true // stopTimer() would otherwise clear what we are about to save
         paused = max(1, end.timeIntervalSinceNow)
         pausedBreak = runningBreak
@@ -761,8 +841,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         stopTimer()
     }
 
+    func bankFocus() { // add the minutes actually spent in the current focus block to today's tally
+        guard !runningBreak, focusStarted != .distantPast else { return }
+        let minutes = Int(Date().timeIntervalSince(focusStarted) / 60)
+        if minutes > 0 { bump("minutes", minutes) }
+        focusStarted = .distantPast
+    }
+
     // Throw the current time away and go back to a full block (or the ready break).
     func stopTimer() {
+        bankFocus()
         running = false
         end = .distantPast
         if keepPause { keepPause = false } // called from pause(): keep the saved time
@@ -790,6 +878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         bar.colour = runningBreak ? C.green : C.accent
         bar.alphaValue = running ? 1 : 0.35
         bar.setFraction(running && total > 0 ? CGFloat(max(0, min(1, Double(left) / total))) : running ? 0 : 1, running: running)
+        updateStats() // live "min focus" while the stats are open
         statusMenu() // menu bar item mirrors the same state
         for b in [up, down] { b.fill = running ? C.bg : C.card } // greyed while running
         // A finished countdown: react once, and mark it used up (otherwise every tick re-triggers the auto rhythm).
@@ -798,7 +887,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
             end = .distantPast
             let wasFocus = !runningBreak
             doneBlock = wasFocus // next start = break; after the break, next start = focus again
-            if wasFocus { cycle += 1; store.set(cycle, forKey: cycleKey) }
+            if wasFocus {
+                cycle += 1; store.set(cycle, forKey: cycleKey)
+                bump("pomos", 1) // one finished focus block today
+                if focusStarted != .distantPast {
+                    let spent = Int(Date().timeIntervalSince(focusStarted) / 60)
+                    if spent > 0 { bump("minutes", spent) }
+                }
+                focusStarted = .distantPast
+            }
             if !runningBreak { workingBreak = breakMinutes } // a block that didn't come from a Start still uses the chosen break
             if wasFocus && autoFocus { startBreak(); chime("Time's up — \(workingBreak) min break") }
             else if !wasFocus && autoFocus { toggle(); chime("Break over — \(focusMinutes) min focus") }

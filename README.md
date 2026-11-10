@@ -14,6 +14,9 @@ A tiny always-on-top pomodoro + checklist for macOS. One Swift file, AppKit only
 - **Checklist**: borderless field at the bottom — type, press ⏎. Tick a box to finish; × on hover deletes it;
   *Clear completed* removes everything ticked. Everything persists between launches.
 - **Pause saves state**: the clock freezes at e.g. `24:12` and resumes there, even after quitting.
+- **Today's tally** (hidden): click the footer line under the list to show/hide
+  `2 pomos · 50m focus · 3 done`. Counts finished focus blocks, minutes actually focused (live while running)
+  and to-dos ticked today; resets at midnight. The choice is remembered.
 
 ## Run it locally
 

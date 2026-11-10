@@ -65,7 +65,27 @@ let checks = #"""
     check(abs(v - 0.4) < 0.01, "after 0.5s of ease the strip is at 40% (own=\(d.bar.shownValue) d=\(d.bar.fractionValue))")
     d.bar.setFraction(0, running: false)
     check(d.bar.shownValue == 0, "stopping snaps the strip")
-    print("all to-do, timer and strip checks passed")
+    // Today's tally: ticks, finished pomos and focus minutes are counted per day; the line is hidden until toggled.
+    check(d.statsWrap.isHidden == !d.showStats, "stats line follows the remembered toggle (hidden=\(d.statsWrap.isHidden))")
+    d.bar.setFraction(0, running: false)
+    d.running = false; d.doneBlock = false; d.runningBreak = false
+    let done0 = d.day["done"] as? Int ?? 0
+    d.items = [Todo(id: 777, text: "stat test", done: false)]
+    d.toggleItem(777)
+    check((d.day["done"] as? Int ?? 0) == done0 + 1, "a tick counts toward today")
+    d.toggleItem(777) // untick: no second count
+    check((d.day["done"] as? Int ?? 0) == done0 + 1, "unticking does not add to the tally")
+    let pomos0 = d.day["pomos"] as? Int ?? 0
+    d.focus = 25 * 60; d.workingBreak = 5; d.focusStarted = Date().addingTimeInterval(-(25 * 60))
+    d.end = .distantPast; d.running = true
+    d.refresh() // finishes the block: counts the pomo + minutes
+    check((d.day["pomos"] as? Int ?? 0) == pomos0 + 1, "finished focus block counts as a pomo")
+    check((d.day["minutes"] as? Int ?? 0) >= 25, "focus minutes banked (\(d.day["minutes"] ?? 0))")
+    if !d.showStats { d.toggleStats() }
+    check(!d.statsWrap.isHidden && d.statsLine.stringValue.contains("pomo") && d.statsLine.stringValue.contains("done"), "stats line reads: \(d.statsLine.stringValue)")
+    d.toggleStats()
+    check(d.statsWrap.isHidden, "clicking the footer again hides it")
+    print("all to-do, timer, strip and stats checks passed")
     exit(0)
 """#
 
