@@ -157,16 +157,21 @@ final class TodoRow: NSControl {
 
 final class Flipped: NSView { override var isFlipped: Bool { true } }
 
-// Footer row: the whole strip is clickable (toggles today's stats); the Clear button on top still gets its clicks.
-final class FooterRow: NSView {
-    var onClick: (() -> Void)?
+// Horizontal row that acts as one click target, except clicks that land on a button inside it (Clear completed).
+final class TagRow: NSStackView {
+    var onTagClick: (() -> Void)?
     override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
     override func mouseDown(with e: NSEvent) {
-        guard !(hitTest(convert(e.locationInWindow, from: nil)) is NSButton) else { return }
-        onClick?()
+        var v = hitTest(convert(e.locationInWindow, from: nil))
+        while let x = v {
+            if x is NSButton { return } // the button handles its own click
+            v = x.superview
+        }
+        onTagClick?()
     }
 }
 
+// Footer row: the whole strip is clickable (toggles today's stats); the Clear button on top still gets its clicks.
 // Time-left strip: full width when idle, then shrinks symmetrically toward the centre as the block runs out.
 // Width changes are eased with a short implicit animation so the ticks look like a gentle drain, not steps.
 final class DrainBar: NSView {
@@ -292,7 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     let entry = Field("", size: 12)
     lazy var addBtn = self.pill("circle-plus", nil) // placeholder; real setup in buildUI
     let listHost = NSStackView()
-    let foot = NSStackView()
+    let foot = TagRow()
     let leftLbl = NSTextField(labelWithString: "")
     lazy var clearBtn = self.pill("Clear completed", nil, wide: true)
     var list: NSScrollView!
@@ -577,7 +582,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         listHeight.isActive = true // after the list is in the stack, matching layout order
         stack.setCustomSpacing(6, after: list)
 
-        // 5. footer: the tally line on the left (it is also the toggle for today's numbers), Clear completed right
+        // 5. footer: "2/4 done" (click = show/hide today's numbers) and Clear completed in one row.
+        //    One row = one view, so click routing stays inside it: buttons act, the rest toggles stats.
         foot.orientation = .horizontal
         foot.alignment = .centerY
         foot.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
@@ -591,17 +597,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         foot.addArrangedSubview(clearBtn)
         foot.translatesAutoresizingMaskIntoConstraints = false
         clearBtn.translatesAutoresizingMaskIntoConstraints = false
-        // Click anywhere on the footer row (except the button itself) to show/hide today's stats.
-        let footRow = FooterRow() // plain view: whole row is a click target
-        footRow.onClick = { [weak self] in self?.toggleStats() }
-        footRow.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
-        footRow.addSubview(foot)
-        NSLayoutConstraint.activate([
-            foot.leadingAnchor.constraint(equalTo: footRow.leadingAnchor),
-            foot.trailingAnchor.constraint(equalTo: footRow.trailingAnchor),
-            foot.centerYAnchor.constraint(equalTo: footRow.centerYAnchor),
-        ])
-        stack.addArrangedSubview(footRow)
+        foot.onTagClick = { [weak self] in self?.toggleStats() } // clicking the label / gap toggles today's stats; the button keeps its own click
+        stack.addArrangedSubview(foot)
 
         // today's numbers: hidden until the footer is clicked, remembered
         statsWrap.orientation = .horizontal
