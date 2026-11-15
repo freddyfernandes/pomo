@@ -3,3 +3,4 @@ build/
 .selfcheck.swift
 .shot.swift
 .DS_Store
+windows/Pomo.exe

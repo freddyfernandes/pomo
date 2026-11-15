@@ -28,17 +28,19 @@ git clone https://github.com/freddyfernandes/pomo && cd pomo
 
 Settings live in `defaults` domain `local.pomo`; `defaults delete local.pomo` resets everything.
 
-### Windows (preview)
+### Windows (overlay)
 
-The source is AppKit, so on Windows it needs an AppKit-compatible toolchain (the [swift.org](https://www.swift.org/download/)
-Windows toolchain with an AppKit port such as win32appkit). It has not been run on Windows yet. In Git Bash:
+A native Windows overlay lives in [`windows/`](windows): one C# file, drawn with the Windows Forms that
+ships with Windows 10/11 — no SDK, no installs.
 
-```bash
-./build.sh           # builds build/Pomo.exe and starts it
+```powershell
+git clone https://github.com/freddyfernandes/pomo && cd pomo\windows
+powershell -ExecutionPolicy Bypass -File build.ps1   # builds Pomo.exe and starts it
 ```
 
-Expected to work: clock, POMO lengths, checklist, pause/resume, tally, always-on-top.
-Not ported yet: the menu bar item, login start, notifications, ⌥-click. Treat it as a preview.
+Same card in the top-right, above other windows: click the clock to start/pause, click **P O M O** for
+1 hr / 25 / 15 / 5 min, type a to-do and press Enter, click a row to tick it or its right edge to delete,
+click the footer line for today's tally. Drag the top area to move it, Esc quits.
 
 ## Develop
 

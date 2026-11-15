@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds and opens Pomo. macOS: build/Pomo.app, Windows (via Swift for Windows): build\Pomo.exe
+# Builds and opens Pomo. macOS: build/Pomo.app. Windows: hands off to windows/build.ps1
 #   ./build.sh            build if needed, then open
 #   ./build.sh --pin      also start at login (menu bar countdown)
 #   ./build.sh --unpin    undo that
@@ -7,13 +7,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Windows (Git Bash / MSYS): no app bundle or login items, just an exe.
+# Windows (Git Bash / MSYS): the native overlay in windows/ is the Windows build.
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    mkdir -p build
-    [ -f build/Pomo.exe ] && [ build/Pomo.exe -nt Pomo.swift ] || swiftc -O Pomo.swift -o build/Pomo.exe
-    [ "${1:-}" = "--once" ] && exit 0
-    start build/Pomo.exe; exit 0 ;;
+    echo "On Windows, build the overlay: windows/build.ps1 (see README)."
+    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 ;;
 esac
 
 # macOS
