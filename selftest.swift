@@ -70,10 +70,10 @@ let checks = #"""
     d.bar.setFraction(0, running: false)
     d.running = false; d.doneBlock = false; d.runningBreak = false
     let done0 = d.day["done"] as? Int ?? 0
-    d.items = [Todo(id: 777, text: "stat test", done: false)]
-    d.toggleItem(777)
+    d.items = [Todo(id: "777", text: "stat test", done: false)]
+    d.toggleItem("777")
     check((d.day["done"] as? Int ?? 0) == done0 + 1, "a tick counts toward today")
-    d.toggleItem(777) // untick: no second count
+    d.toggleItem("777") // untick: no second count
     check((d.day["done"] as? Int ?? 0) == done0 + 1, "unticking does not add to the tally")
     let pomos0 = d.day["pomos"] as? Int ?? 0
     d.focus = 25 * 60; d.workingBreak = 5; d.focusStarted = Date().addingTimeInterval(-(25 * 60))
@@ -89,7 +89,21 @@ let checks = #"""
     check(d.statsLine.stringValue == "0 pomos · 0m focus · 0 done", "stats line zeroed: \(d.statsLine.stringValue)")
     d.toggleStats()
     check(d.statsWrap.isHidden, "clicking the footer again hides it")
-    print("all to-do, timer, strip and stats checks passed")
+    // Robustness: stats and the list never share state, and corrupt saved values fall back to sane ones.
+    let boardCount = d.items.count
+    let doneBefore = d.day["done"] as? Int ?? 0
+    if d.showStats { d.toggleStats() }
+    d.items.append(Todo(id: "iso", text: "isolation", done: false))
+    d.toggleItem("iso")
+    check(d.day["done"] as? Int ?? 0 == doneBefore + 1 && d.items.count == boardCount + 1, "a tick updates the tally without touching the list count")
+    d.resetDay()
+    check(d.items.count == boardCount + 1 && d.day.isEmpty, "resetting stats leaves the to-do list alone (list=\(d.items.count), day=\(d.day))")
+    d.store.set(0.0 / 0.0, forKey: "paused") // NaN, as a corrupt save could contain
+    d.store.set(5000.0, forKey: "break")
+    d.store.set([["  ", false], ["ok", false], ["x" + String(repeating: "y", count: 500), false]], forKey: "tasks")
+    let app2 = AppDelegate() // a fresh launch reads that garbage at init; it must not throw
+    _ = app2
+    print("all to-do, timer, strip, stats and robustness checks passed")
     exit(0)
 """#
 

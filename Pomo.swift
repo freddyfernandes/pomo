@@ -280,7 +280,7 @@ private extension NSFont {
     }
 }
 
-struct Todo { var id: Int; var text: String; var done: Bool }
+struct Todo { var id: String; var text: String; var done: Bool }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate {
@@ -307,7 +307,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     // Progress is one array rather than separate "done:X" keys: clearing can never desync the two.
     // Items are tracked by id, not by text: the same to-do twice is two rows, and no index goes stale on rebuild.
     var items: [Todo] = []
-    var nextId = 1
     var focus: TimeInterval = 0 // 0 -> 25 min
     var paused: TimeInterval = 0 // seconds left at the last pause; 0 = nothing to resume
     var focusMinutes: Int { focus == 0 ? 25 : Int((focus / 60).rounded()) }
@@ -372,6 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         panel.minSize = NSSize(width: C.width, height: 0)
 
         focus = store.double(forKey: "focus")
+        if focus.isNaN || focus < 60 || focus > 999 * 60 { focus = 0 } // corrupt value -> default 25 min
         if let live = store.object(forKey: "handoffEnd") as? Date, live > Date(), !running { // quit while running: keep it
             end = live
             running = true
@@ -380,30 +380,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         }
         let todos = store.stringArray(forKey: "todos") ?? [] // older saves: names + "done:<name>" flags
         items = (store.array(forKey: "tasks") as? [[Any]] ?? []).compactMap { row in
-            guard let t = row.first as? String else { return nil }
-            return Todo(id: 0, text: t, done: (row.count > 1 ? row[1] as? Bool : nil) ?? store.bool(forKey: "done:" + t))
+            guard let t = (row.first as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+            let id = (row.count > 2 ? row[2] as? String : nil) ?? UUID().uuidString // older saves had no id
+            return Todo(id: id, text: String(t.prefix(200)), done: (row.count > 1 ? row[1] as? Bool : nil) ?? store.bool(forKey: "done:" + t))
         }
-        if items.isEmpty { items = todos.map { Todo(id: 0, text: $0, done: store.bool(forKey: "done:" + $0)) } }
-        for i in items.indices { items[i].id = i } // ids must be unique; the old save format only had name + state
-        nextId = items.count
+        if items.isEmpty { items = todos.map { Todo(id: UUID().uuidString, text: $0, done: store.bool(forKey: "done:" + $0)) } }
         for t in todos { store.removeObject(forKey: "done:" + t) } // migrate once, then the old keys are gone
         store.removeObject(forKey: "todos")
 
         buildUI()
         listHeight.constant = CGFloat(max(rows, items.count, showStats ? 1 : 0)) * C.row // fit the real list at once
         autoHeight()
-        if let s = NSScreen.main?.visibleFrame {
-            panel.setFrameTopLeftPoint(NSPoint(x: s.maxX - panel.frame.width - 12, y: s.maxY - 12)) // top-right corner
-        }
+        placeTopRight()
+        pinnedTop = panel.frame.maxY
         panel.orderFrontRegardless()
         if pinnedCountdown { handOver() } // replace the old copy, keep its countdown
         autoFocus = store.bool(forKey: "auto")
         cycle = store.integer(forKey: cycleKey)
         day = (store.dictionary(forKey: dayKey) ?? [:])
         day["done"] = day["done"] as? Int ?? 0
-        let savedBreak = Int(store.double(forKey: "break"))
-        breakMinutes = (1...60).contains(savedBreak) ? savedBreak : 5
-        paused = store.double(forKey: "paused")
+        let savedBreak = store.double(forKey: "break")
+        breakMinutes = (1...60).contains(savedBreak) && !savedBreak.isNaN ? Int(savedBreak) : 5
+        let savedPause = store.double(forKey: "paused")
+        paused = savedPause.isFinite && savedPause > 0 && savedPause < 24 * 3600 ? savedPause : 0
         pausedBreak = store.bool(forKey: "pausedBreak")
         history = store.array(forKey: "history") as? [Int] ?? []
         dragRows = Int(store.double(forKey: "listRows").rounded())
@@ -418,6 +417,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             MainActor.assumeIsolated { self?.key(e) ?? e }
         }
+    }
+
+    // Corner placement must survive a menu bar on a second display or a notch: use the screen under the pointer.
+    func placeTopRight() {
+        let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
+        guard let vf = screen?.visibleFrame else { return }
+        panel.setFrameTopLeftPoint(NSPoint(x: vf.maxX - panel.frame.width - 12, y: vf.maxY - 12))
+        pinnedTop = panel.frame.maxY
     }
 
     func windowShouldClose(_: NSWindow) -> Bool { panel.orderOut(nil); return false } // reopen from the menu bar
@@ -506,7 +513,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         // 1. time-left strip across the top: it drains from both ends toward the centre as the block runs out
         bar.trackWidth = C.width
         bar.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(bar)
+        stack.insertArrangedSubview(bar, at: 0) // first row, always
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: stack.topAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 3),
+            bar.widthAnchor.constraint(equalToConstant: C.width),
+        ])
 
         // 2. the timer: big plain digits (no tint, no box), the POMO wordmark under them, and the state word.
         //    Click the clock to start/pause. ▲▼ appear only when the pointer comes near.
@@ -551,6 +563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         // 3. input bar: borderless, centred like the list; ⏎ adds
         entry.alignment = .left
         entry.font = .systemFont(ofSize: 12)
+        if let cell = entry.cell as? NSTextFieldCell { cell.placeholderString = "New to-do" }
         entry.isEditable = true
         entry.delegate = self
         entry.target = self
@@ -627,15 +640,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     // Only the list drives its own height; the timer never resizes anything. The window follows the list,
     // pinned by its top edge, keeping a user-dragged height as a floor.
     func autoHeight() {
-        let wanted = max(rows, items.count, dragRows)
-        if listHeight.constant != CGFloat(wanted) * C.row { listHeight.constant = CGFloat(wanted) * C.row }
         let content = panel.contentView!
         content.layoutSubtreeIfNeeded()
         let height = max(stack.frame.height, 200) + 14 // stack's top inset + a small bottom margin
         let top = panel.frame.maxY
         guard abs(panel.contentLayoutRect.height - height) > 0.5 else { return }
         panel.setContentSize(NSSize(width: content.frame.width, height: height))
+        if !panel.isVisible { return } // first sizing before show: placement happens in placeTopRight()
         panel.setFrameTopLeftPoint(NSPoint(x: panel.frame.minX, y: top)) // corner stays put
+        pinnedTop = top
     }
 
     var dragRows = 0 // extra rows the user dragged in; remembered, never reduced when the list shrinks
@@ -649,8 +662,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         sizeListContent()
     }
 
-    func windowDidResize(_: Notification) { // reaching past the to-dos: spring back (see windowDidEndLiveResize)
+    // Resizing must never drift the window's top edge (AppKit can anchor the bottom), so re-pin it each time.
+    var pinnedTop: CGFloat?
+    func windowDidResize(_: Notification) {
         sizeListContent()
+        if let top = pinnedTop, abs(panel.frame.maxY - top) > 0.5, panel.isVisible { panel.setFrameTopLeftPoint(NSPoint(x: panel.frame.minX, y: top)) }
     }
 
     func sizeListContent() { // scroll view documents get no layout pass of their own
@@ -662,7 +678,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
     // MARK: to-dos
     func saveItems() {
-        store.set(items.map { [$0.text, $0.done] }, forKey: "tasks") // id is just the row's position at save time
+        store.set(items.map { [$0.text, $0.done, $0.id] }, forKey: "tasks")
     }
 
     func rebuildList() {
@@ -739,7 +755,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         ])
     }
 
-    func toggleItem(_ id: Int) {
+    func toggleItem(_ id: String) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         items[i].done = !items[i].done
         if items[i].done { bump("done", 1) } // today's tally: each tick counts once
@@ -747,7 +763,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         rebuildList()
     }
 
-    func remove(_ id: Int) {
+    func remove(_ id: String) {
         items.removeAll { $0.id == id }
         saveItems()
         rebuildList()
@@ -763,8 +779,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         let text = entry.stringValue.trimmingCharacters(in: .whitespaces)
         entry.stringValue = ""
         guard !text.isEmpty else { return }
-        items.append(Todo(id: nextId, text: text, done: false))
-        nextId += 1
+        items.append(Todo(id: UUID().uuidString, text: text, done: false))
         saveItems()
         rebuildList()
     }
