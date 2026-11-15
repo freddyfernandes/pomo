@@ -802,10 +802,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         stack.addArrangedSubview(statsWrap)
 
         // theme swatches, always present; click one to switch the look
-        themeRow.orientation = .horizontal
-        themeRow.alignment = .centerX
-        themeRow.spacing = 4
-        themeRow.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
         for p in C.presets {
             let sw = Swatch(p)
             sw.widthAnchor.constraint(equalToConstant: 18).isActive = true
@@ -823,7 +819,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         custom.onPick = { [weak self] in self?.customTheme() }
         themeRow.addArrangedSubview(custom)
         customSwatch = custom
-        // Fixed geometry: the row is a plain 18pt strip of swatches at the bottom of the card.
+        // Fixed geometry: an 18pt strip of swatches at the bottom of the card.
         themeRow.orientation = .horizontal
         themeRow.alignment = .centerY
         themeRow.spacing = 6
