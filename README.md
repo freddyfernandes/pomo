@@ -6,7 +6,8 @@ A minimal always-on-top pomodoro and checklist for macOS. One Swift file, no dep
 
 ## Use
 
-- Click the clock to start, pause or resume. ⌥-click restarts.
+- Click the clock to start, pause or resume. ⌥-click restarts. Set a length by typing on the clock (⏎),
+  with the ▲▼ chevrons, or with ↑ / ↓ while the clock is focused.
 - **POMO** under the clock picks a length: **P** 1 hr · **O** 25 min · **M** 15 min · **O** 5 min.
   The same word sits in the menu bar; ⌄ opens the menu (start/pause, automatic rhythm, reset stats, quit).
 - Focus ends → 5 min break → next focus, when *Automatic rhythm* is on.
@@ -30,9 +31,10 @@ Settings live in `defaults` domain `local.pomo`; `defaults delete local.pomo` re
 
 ### Looks
 
-Menu bar → **Theme**: `Ember` (default, warm orange on near-black), `Slate` (cool blue-grey),
-`Forest` (green), `Sakura` (pink), `Paper` (light), or **Custom…** to pick an accent and background colour.
-The choice is saved. From a shell: `defaults write local.pomo theme slate` (or `accent "#33CC99"` for any theme).
+Menu bar → **Theme**: `Ember` (default, warm orange on near-black), `Slate`, `Forest`, `Sakura`, `Paper` (light),
+or **Custom…** — five colour wells (background, card, accent, break, text) to build your own combo.
+The card stays clean; looks are picked from the menu bar. The choice is saved, and scriptable too:
+`defaults write local.pomo theme slate`.
 
 ### Windows (overlay)
 

@@ -56,6 +56,7 @@ enum C {
     }
 
     // "theme" = ember|slate|forest|sakura|paper|custom; any theme also accepts an "accent" override.
+    // A custom theme is stored as one customTheme=bg,card,accent,break,text line (any part may be left out).
     static func apply(_ store: UserDefaults) {
         let wanted = (store.string(forKey: "theme") ?? "ember").lowercased()
         theme = presets.first { $0.name.lowercased() == wanted } ?? presets[0]
@@ -67,10 +68,20 @@ enum C {
                 theme.control = bg.blended(withFraction: 0.22, of: .white) ?? bg
             }
         }
+        if wanted == "custom", let line = store.string(forKey: "customTheme") {
+            let parts = line.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            if parts.count == 5 {
+                if let c = colour(parts[0]) { theme.bg = c; theme.card = c.blended(withFraction: 0.12, of: .white) ?? c; theme.control = c.blended(withFraction: 0.22, of: .white) ?? c }
+                if let c = colour(parts[1]) { theme.card = c; theme.control = c.blended(withFraction: 0.06, of: .white) ?? c }
+                if let c = colour(parts[2]) { theme.accent = c }
+                if let c = colour(parts[3]) { theme.green = c }
+                theme.text = colour(parts[4]) ?? (theme.bg.isLight ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.94, alpha: 1))
+            }
+        }
         if let accent = colour(store.string(forKey: "accent") ?? "") { theme.accent = accent }
-        theme.text = theme.bg.isLight ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.94, alpha: 1)
-        theme.dim = theme.bg.isLight ? NSColor(white: 0.42, alpha: 1) : NSColor(white: 0.62, alpha: 1)
-        theme.faint = theme.bg.isLight ? NSColor(white: 0.58, alpha: 1) : NSColor(white: 0.38, alpha: 1)
+        if wanted != "custom" { theme.text = theme.bg.isLight ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.94, alpha: 1) }
+        theme.dim = theme.text.withAlphaComponent(theme.bg.isLight ? 0.5 : 0.62)
+        theme.faint = theme.text.withAlphaComponent(theme.bg.isLight ? 0.35 : 0.36)
     }
 }
 
@@ -223,58 +234,7 @@ final class TodoRow: NSControl {
 
 final class Flipped: NSView { override var isFlipped: Bool { true } }
 
-// The "make your own" swatch: a dashed ring with a plus in it, painted (no glyph or button chrome).
-final class CustomSwatch: NSView {
-    var chosen = false { didSet { needsDisplay = true } }
-    var onPick: (() -> Void)?
-    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
-    override func mouseDown(with e: NSEvent) { onPick?() }
-    override func draw(_ rect: NSRect) {
-        let r = bounds.insetBy(dx: 2, dy: 2)
-        C.card.setFill()
-        NSBezierPath(ovalIn: r).fill()
-        let ring = NSBezierPath(ovalIn: r)
-        ring.lineWidth = chosen ? 2 : 1
-        (chosen ? C.accent : C.dim).setStroke()
-        ring.stroke()
-        C.dim.setStroke()
-        let plus = NSBezierPath()
-        plus.move(to: NSPoint(x: r.midX - 3.5, y: r.midY)); plus.line(to: NSPoint(x: r.midX + 3.5, y: r.midY))
-        plus.move(to: NSPoint(x: r.midX, y: r.midY - 3.5)); plus.line(to: NSPoint(x: r.midX, y: r.midY + 3.5))
-        plus.lineWidth = 1.2
-        plus.stroke()
-    }
-}
 
-// A circle in a palette's colours: background, accent, and break colour — a theme you can see before picking it.
-final class Swatch: NSView {
-    var palette: Palette { didSet { needsDisplay = true } }
-    var chosen = false { didSet { needsDisplay = true } }
-    var onPick: (() -> Void)?
-    init(_ palette: Palette) {
-        self.palette = palette
-        super.init(frame: .zero)
-    }
-    required init?(coder: NSCoder) { fatalError("not used") }
-    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
-    override func mouseDown(with e: NSEvent) { onPick?() }
-    override func draw(_ rect: NSRect) {
-        let r = bounds
-        palette.bg.setFill()
-        NSBezierPath(ovalIn: r.insetBy(dx: 2, dy: 2)).fill()
-        palette.accent.setFill() // a half-moon of the accent
-        let wedge = NSBezierPath()
-        wedge.appendArc(withCenter: NSPoint(x: r.midX, y: r.midY), radius: r.width / 2 - 2, startAngle: -90, endAngle: 90)
-        wedge.close()
-        wedge.fill()
-        palette.green.setFill()
-        NSBezierPath(ovalIn: NSRect(x: r.midX - 4, y: r.midY - r.height / 2 + 3, width: 8, height: 8)).fill()
-        let ring = NSBezierPath(ovalIn: r.insetBy(dx: 1, dy: 1))
-        ring.lineWidth = chosen ? 2 : 1
-        (chosen ? C.text : NSColor(white: 1, alpha: 0.18)).setStroke()
-        ring.stroke()
-    }
-}
 
 // Horizontal row that acts as one click target, except clicks that land on a button inside it (Clear completed).
 final class TagRow: NSStackView {
@@ -563,31 +523,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     // Pinned mode keeps exactly one running copy. A newly launched instance asks the existing one to hand over:
     // it saves its live countdown on the way out, and this one adopts it before building its UI.
     // Shortcut: a hung old copy is force-quit after 1s, and the persisted pause state is used instead.
-    @objc func customTheme() {
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "Custom theme"
-        alert.informativeText = "Accent: the clock's running colour, the strip and the active letter.\nBackground: the card itself. Text flips to dark ink on light backgrounds."
-        let accent = NSColorWell(frame: NSRect(x: 0, y: 30, width: 44, height: 26))
-        accent.color = C.accent
-        let bg = NSColorWell(frame: NSRect(x: 52, y: 30, width: 44, height: 26))
-        bg.color = C.bg
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 104, height: 64))
-        view.addSubview(accent)
-        view.addSubview(bg)
-        alert.accessoryView = view
-        alert.addButton(withTitle: "Apply")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        applyTheme("custom", accent: accent.color, bg: bg.color)
-    }
 
     // Switch look at runtime: persist the choice, repaint the panel and its subviews.
-    func applyTheme(_ name: String, accent: NSColor?, bg: NSColor?) {
+    // name = a preset, or "custom" with the full set of colours (nil channels fall back to the current ones).
+    func applyTheme(_ name: String, accent: NSColor?, bg: NSColor?, card: NSColor? = nil, breakc: NSColor? = nil, textc: NSColor? = nil) {
         store.set(name, forKey: "theme")
-        if let a = accent { store.set(C.hex(a), forKey: "accent") } else { store.removeObject(forKey: "accent") }
-        if let b = bg { store.set(C.hex(b), forKey: "bg") } else { store.removeObject(forKey: "bg") }
+        if name == "custom" {
+            let b = bg ?? C.bg, c = card ?? C.card, a = accent ?? C.accent, g = breakc ?? C.green, t = textc ?? C.text
+            store.set([C.hex(b), C.hex(c), C.hex(a), C.hex(g), C.hex(t)].joined(separator: ","), forKey: "customTheme")
+        } else {
+            store.removeObject(forKey: "customTheme")
+            if let a = accent { store.set(C.hex(a), forKey: "accent") } else { store.removeObject(forKey: "accent") }
+            if let b = bg { store.set(C.hex(b), forKey: "bg") } else { store.removeObject(forKey: "bg") }
+        }
         C.apply(store)
         styleChrome()
         refresh()
@@ -605,14 +553,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         entry.textColor = C.text
         entry.placeholderAttributedString = NSAttributedString(string: "  New to-do", attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: C.faint])
         clearBtn.contentTintColor = C.dim
-        customSwatch?.chosen = C.theme.name == "Custom"
         for b in [up, down] { b.fill = C.card }
         updateStats()
         panel.contentView?.needsDisplay = true
         stack.needsDisplay = true
         mark.needsDisplay = true
         bar.needsDisplay = true
-        for sw in themeSwatches { sw.needsDisplay = true }
     }
 
 
@@ -801,33 +747,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         statsWrap.isHidden = !showStats
         stack.addArrangedSubview(statsWrap)
 
-        // theme swatches, always present; click one to switch the look
-        for p in C.presets {
-            let sw = Swatch(p)
-            sw.widthAnchor.constraint(equalToConstant: 18).isActive = true
-            sw.heightAnchor.constraint(equalToConstant: 18).isActive = true
-            let name = p.name.lowercased()
-            sw.toolTip = "Theme: " + p.name
-            sw.onPick = { [weak self] in self?.applyTheme(name, accent: nil, bg: nil) }
-            themeRow.addArrangedSubview(sw)
-            themeSwatches.append(sw)
-        }
-        let custom = CustomSwatch()
-        custom.widthAnchor.constraint(equalToConstant: 18).isActive = true
-        custom.heightAnchor.constraint(equalToConstant: 18).isActive = true
-        custom.toolTip = "Custom theme…"
-        custom.onPick = { [weak self] in self?.customTheme() }
-        themeRow.addArrangedSubview(custom)
-        customSwatch = custom
-        // Fixed geometry: an 18pt strip of swatches at the bottom of the card.
-        themeRow.orientation = .horizontal
-        themeRow.alignment = .centerY
-        themeRow.spacing = 6
-        themeRow.distribution = .fill
-        themeRow.translatesAutoresizingMaskIntoConstraints = false
-        themeRow.widthAnchor.constraint(equalToConstant: 6 * 18 + 5 * 6).isActive = true
-        themeRow.heightAnchor.constraint(equalToConstant: 18).isActive = true
-        stack.addArrangedSubview(themeRow)
 
         let content = panel.contentView!
         content.addSubview(stack)
@@ -839,9 +758,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         ])
         rebuildList()
     }
-    let themeRow = NSStackView() // also gets .horizontal in buildUI, before it joins the vertical stack
-    var themeSwatches: [Swatch] = []
-    var customSwatch: CustomSwatch?
     let bar = DrainBar() // animated time-left strip
     let stateLabel = NSTextField(labelWithString: "")
     let mark = Wordmark() // POMO under the clock, each letter a length toggle
@@ -1106,8 +1022,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
             + (autoFocus ? " · auto" : "")
         stateLabel.textColor = runningBreak ? C.green : running || paused > 0 ? C.accent : C.faint
         mark.state = Wordmark.State(running: running, isBreak: runningBreak, minutes: doneBlock ? breakMinutes : focusMinutes)
-        for sw in themeSwatches { sw.chosen = sw.palette.name.lowercased() == C.theme.name.lowercased() }
-        customSwatch?.chosen = C.theme.name == "Custom"
         setDimmed(running && !runningBreak) // focus: the list steps back, the clock is the only bright thing
         // Time-left strip, updated before the end-of-block handoff below starts the next phase in this same pass.
         bar.colour = runningBreak ? C.green : C.accent
@@ -1184,15 +1098,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         guard panel.isKeyWindow, panel.firstResponder === clock || typing else { return e }
         if !e.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty, e.modifierFlags != .numericPad { return e }
         let ch = e.charactersIgnoringModifiers ?? ""
-        if (e.keyCode == 126 || e.keyCode == 125), !typing, !running { step(e.keyCode == 126 ? up : down); return nil }
-        if typing {
+        if typing { // a number is being entered on the clock
             switch e.keyCode {
             case 36, 76: commitClock(); return nil
             case 53, 51: typing = false; refresh(); return nil
-            case 123...126: return nil
+            case 126, 125: if let n = Int(typed) { typed = String(max(1, n + (e.keyCode == 126 ? 1 : -1))) }; refresh(); return nil
+            case 123, 124: return nil
             default: break
             }
             if ch.count == 1, ch.first!.isNumber, typed.count < 4 { typed += ch; refresh(); return nil }
+            return nil
+        }
+        // ↑ / ↓ on the clock: one minute up or down, exactly like the chevrons (a running block pauses first)
+        if e.keyCode == 126 || e.keyCode == 125 {
+            if running { pause() }
+            step(e.keyCode == 126 ? up : down)
             return nil
         }
         if ch.count == 1, ch.first!.isNumber { typing = true; typed = ch; refresh(); return nil }
@@ -1332,24 +1252,34 @@ final class MenuBar: NSObject, NSApplicationDelegate {
     }
 
     // Custom look: a colour well for the accent (and one for the background), applied live.
+    // Combine your own look: background, card, accent, break and text colours, all live in one dialog.
     @objc func customTheme() {
         guard let d = NSApp.delegate as? AppDelegate else { return }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Custom theme"
-        alert.informativeText = "Pick an accent and a background colour."
-        let accent = NSColorWell(frame: NSRect(x: 0, y: 34, width: 44, height: 24))
-        accent.color = C.accent
-        let bg = NSColorWell(frame: NSRect(x: 52, y: 34, width: 44, height: 24))
-        bg.color = C.bg
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 104, height: 60))
-        view.addSubview(accent)
-        view.addSubview(bg)
-        alert.accessoryView = view
+        alert.informativeText = "Background · card · accent (clock, strip, active letter) · break · text."
+        let wells: [(String, NSColor)] = [
+            ("Background", C.bg), ("Card", C.card), ("Accent", C.accent), ("Break", C.green), ("Text", C.text),
+        ]
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 5 * 48, height: 62))
+        var colorWells: [NSColorWell] = []
+        for (i, (label, colour)) in wells.enumerated() {
+            let well = NSColorWell(frame: NSRect(x: CGFloat(i) * 48, y: 26, width: 40, height: 24))
+            well.color = colour
+            let name = NSTextField(labelWithString: label)
+            name.font = .systemFont(ofSize: 9)
+            name.frame = NSRect(x: CGFloat(i) * 48, y: 6, width: 46, height: 14)
+            box.addSubview(well)
+            box.addSubview(name)
+            colorWells.append(well)
+        }
+        alert.accessoryView = box
         alert.addButton(withTitle: "Apply")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        d.applyTheme("custom", accent: accent.color, bg: bg.color)
+        d.applyTheme("custom", accent: colorWells[2].color, bg: colorWells[0].color,
+                     card: colorWells[1].color, breakc: colorWells[3].color, textc: colorWells[4].color)
     }
 
     // Stats: "Reset today's stats" clears the tally after a one-click confirmation.

@@ -109,12 +109,24 @@ let checks = #"""
     check(C.theme.name == "Slate" && C.accent != NSColor(srgbRed: 0.95, green: 0.55, blue: 0.28, alpha: 1), "preset theme applies: \(C.theme.name)")
     d.applyTheme("custom", accent: C.colour("#33CC99"), bg: C.colour("#101820"))
     check(C.theme.name == "Custom" && C.hex(C.accent) == "#33CC99" && C.hex(C.bg) == "#101820", "custom theme: \(C.theme.name) accent \(C.hex(C.accent))")
-    check(d.store.string(forKey: "theme") == "custom" && d.store.string(forKey: "accent") == "#33CC99", "theme choice is saved for the next launch")
+    let savedCustom = d.store.string(forKey: "customTheme") ?? ""
+    check(d.store.string(forKey: "theme") == "custom" && savedCustom.split(separator: ",").count == 5, "custom theme saved as a full palette: \(savedCustom)")
     d.applyTheme("paper", accent: nil, bg: nil)
     check(C.bg.isLight && C.text.isLight == false, "light preset flips the text to dark ink")
     d.applyTheme("ember", accent: nil, bg: nil)
     check(C.theme.name == "Ember" && C.hex(C.accent) == "#F28C47", "back to the default look")
-    print("all to-do, timer, strip, stats, theme and robustness checks passed")
+    // Manual time: chevrons + one minute, arrow keys the same, typing a number then Enter.
+    d.stopTimer(); d.doneBlock = false; d.runningBreak = false; d.preset(25); d.setBreak(5)
+    d.running = false
+    let before = d.focusMinutes
+    d.step(d.up); d.step(d.up); d.step(d.down)
+    check(d.focusMinutes == before + 1, "chevrons step the length: 25 -> \(d.focusMinutes)")
+    d.typing = true; d.typed = "30"
+    d.key(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: d.panel.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 125)!)
+    check(d.typed == "29", "↓ nudges the number being typed (\(d.typed))")
+    d.typing = false
+    // ↑ / ↓ routing needs a real key window, which this harness cannot make; checked by hand in the app.
+    print("all to-do, timer, strip, stats, theme, manual-time and robustness checks passed")
     exit(0)
 """#
 
