@@ -263,10 +263,14 @@ final class Wordmark: NSView {
             let color: NSColor = selected ? C.accent : hovered == i ? C.text : state.running ? C.dim : NSColor(white: 0.62, alpha: 1)
             let s = NSAttributedString(string: ch, attributes: [.font: font, .foregroundColor: color, .kern: 2.5])
             let size = s.size()
-            s.draw(at: NSPoint(x: CGFloat(i) * cell + (cell - size.width) / 2, y: (bounds.height - size.height) / 2))
-            if selected { // a small underline under the active length
+            let glyphX = CGFloat(i) * cell + (cell - size.width) / 2
+            s.draw(at: NSPoint(x: glyphX, y: (bounds.height - size.height) / 2))
+            if selected { // underline sits centred under the letter's own ink, not the cell or the kerned text box
+                let lineW: CGFloat = 12
+                let ink = s.boundingRect(with: NSSize(width: 999, height: 999), options: [.usesLineFragmentOrigin, .usesFontLeading])
+                let inkX = ink.width > 0 ? glyphX + ink.midX : glyphX + size.width / 2
                 C.accent.setFill()
-                NSBezierPath(roundedRect: NSRect(x: CGFloat(i) * cell + cell / 2 - 6, y: 1, width: 12, height: 1.5), xRadius: 0.75, yRadius: 0.75).fill()
+                NSBezierPath(roundedRect: NSRect(x: inkX - lineW / 2, y: 1, width: lineW, height: 1.5), xRadius: 0.75, yRadius: 0.75).fill()
             }
         }
     }

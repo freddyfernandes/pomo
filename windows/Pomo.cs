@@ -213,8 +213,10 @@ static class Pomo {
         using (var font = new Font("Segoe UI Semibold", 11, GraphicsUnit.Point)) {
             for (int i = 0; i < Letters.Length; i++) {
                 bool on = Lengths[i] == current;
-                using (var brush = new SolidBrush(on ? Orange : Dim)) g.DrawString(Letters[i], font, brush, startX + i * cell + 8, MarkY);
-                if (on) using (var brush = new SolidBrush(Orange)) g.FillRectangle(brush, startX + i * cell + 9, MarkY + 19, 9, 2);
+                SizeF sz = g.MeasureString(Letters[i], font);
+                float glyphX = startX + i * cell + (cell - sz.Width) / 2; // centre each letter in its cell
+                using (var brush = new SolidBrush(on ? Orange : Dim)) g.DrawString(Letters[i], font, brush, glyphX, MarkY);
+                if (on) using (var brush = new SolidBrush(Orange)) g.FillRectangle(brush, glyphX + sz.Width / 2 - 5, MarkY + 19, 10, 2); // centred under the letter
             }
         }
 
