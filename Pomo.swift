@@ -223,6 +223,59 @@ final class TodoRow: NSControl {
 
 final class Flipped: NSView { override var isFlipped: Bool { true } }
 
+// The "make your own" swatch: a dashed ring with a plus in it, painted (no glyph or button chrome).
+final class CustomSwatch: NSView {
+    var chosen = false { didSet { needsDisplay = true } }
+    var onPick: (() -> Void)?
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
+    override func mouseDown(with e: NSEvent) { onPick?() }
+    override func draw(_ rect: NSRect) {
+        let r = bounds.insetBy(dx: 2, dy: 2)
+        C.card.setFill()
+        NSBezierPath(ovalIn: r).fill()
+        let ring = NSBezierPath(ovalIn: r)
+        ring.lineWidth = chosen ? 2 : 1
+        (chosen ? C.accent : C.dim).setStroke()
+        ring.stroke()
+        C.dim.setStroke()
+        let plus = NSBezierPath()
+        plus.move(to: NSPoint(x: r.midX - 3.5, y: r.midY)); plus.line(to: NSPoint(x: r.midX + 3.5, y: r.midY))
+        plus.move(to: NSPoint(x: r.midX, y: r.midY - 3.5)); plus.line(to: NSPoint(x: r.midX, y: r.midY + 3.5))
+        plus.lineWidth = 1.2
+        plus.stroke()
+    }
+}
+
+// A circle in a palette's colours: background, accent, and break colour — a theme you can see before picking it.
+final class Swatch: NSView {
+    var palette: Palette { didSet { needsDisplay = true } }
+    var chosen = false { didSet { needsDisplay = true } }
+    var onPick: (() -> Void)?
+    init(_ palette: Palette) {
+        self.palette = palette
+        super.init(frame: .zero)
+    }
+    required init?(coder: NSCoder) { fatalError("not used") }
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
+    override func mouseDown(with e: NSEvent) { onPick?() }
+    override func draw(_ rect: NSRect) {
+        let r = bounds
+        palette.bg.setFill()
+        NSBezierPath(ovalIn: r.insetBy(dx: 2, dy: 2)).fill()
+        palette.accent.setFill() // a half-moon of the accent
+        let wedge = NSBezierPath()
+        wedge.appendArc(withCenter: NSPoint(x: r.midX, y: r.midY), radius: r.width / 2 - 2, startAngle: -90, endAngle: 90)
+        wedge.close()
+        wedge.fill()
+        palette.green.setFill()
+        NSBezierPath(ovalIn: NSRect(x: r.midX - 4, y: r.midY - r.height / 2 + 3, width: 8, height: 8)).fill()
+        let ring = NSBezierPath(ovalIn: r.insetBy(dx: 1, dy: 1))
+        ring.lineWidth = chosen ? 2 : 1
+        (chosen ? C.text : NSColor(white: 1, alpha: 0.18)).setStroke()
+        ring.stroke()
+    }
+}
+
 // Horizontal row that acts as one click target, except clicks that land on a button inside it (Clear completed).
 final class TagRow: NSStackView {
     var onTagClick: (() -> Void)?
@@ -460,6 +513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         store.removeObject(forKey: "todos")
 
         buildUI()
+        styleChrome()
         listHeight.constant = CGFloat(max(rows, items.count, showStats ? 1 : 0)) * C.row // fit the real list at once
         autoHeight()
         placeTopRight()
@@ -509,33 +563,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     // Pinned mode keeps exactly one running copy. A newly launched instance asks the existing one to hand over:
     // it saves its live countdown on the way out, and this one adopts it before building its UI.
     // Shortcut: a hung old copy is force-quit after 1s, and the persisted pause state is used instead.
+    @objc func customTheme() {
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Custom theme"
+        alert.informativeText = "Accent: the clock's running colour, the strip and the active letter.\nBackground: the card itself. Text flips to dark ink on light backgrounds."
+        let accent = NSColorWell(frame: NSRect(x: 0, y: 30, width: 44, height: 26))
+        accent.color = C.accent
+        let bg = NSColorWell(frame: NSRect(x: 52, y: 30, width: 44, height: 26))
+        bg.color = C.bg
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 104, height: 64))
+        view.addSubview(accent)
+        view.addSubview(bg)
+        alert.accessoryView = view
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        applyTheme("custom", accent: accent.color, bg: bg.color)
+    }
+
     // Switch look at runtime: persist the choice, repaint the panel and its subviews.
     func applyTheme(_ name: String, accent: NSColor?, bg: NSColor?) {
         store.set(name, forKey: "theme")
         if let a = accent { store.set(C.hex(a), forKey: "accent") } else { store.removeObject(forKey: "accent") }
         if let b = bg { store.set(C.hex(b), forKey: "bg") } else { store.removeObject(forKey: "bg") }
         C.apply(store)
-        panel.appearance = NSAppearance(named: C.bg.isLight ? .aqua : .darkAqua)
-        panel.backgroundColor = C.bg
-        restyle()
+        styleChrome()
         refresh()
-        rebuildList() // rows draw their own colours
+        rebuildList() // custom-drawn rows read the palette at draw time; rebuild so text fields re-take theirs too
+        panel.invalidateShadow()
     }
 
-    // Push the current palette into views that cached colours at build time.
-    func restyle() {
+    // Everything the window itself owns. Called at launch and after any theme change, so there is one code path.
+    func styleChrome() {
+        panel.appearance = NSAppearance(named: C.bg.isLight ? .aqua : .darkAqua)
+        panel.backgroundColor = C.bg
         clock.textColor = C.text
-        leftLbl.textColor = C.faint
         stateLabel.textColor = C.faint
-        updateStats()
+        leftLbl.textColor = C.faint
         entry.textColor = C.text
         entry.placeholderAttributedString = NSAttributedString(string: "  New to-do", attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: C.faint])
         clearBtn.contentTintColor = C.dim
+        customSwatch?.chosen = C.theme.name == "Custom"
+        for b in [up, down] { b.fill = C.card }
+        updateStats()
         panel.contentView?.needsDisplay = true
         stack.needsDisplay = true
         mark.needsDisplay = true
         bar.needsDisplay = true
+        for sw in themeSwatches { sw.needsDisplay = true }
     }
+
 
     func setPinned(_ on: Bool) {
         store.set(on, forKey: "pinMenuBar")
@@ -713,6 +792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         foot.onTagClick = { [weak self] in self?.toggleStats() } // clicking the label / gap toggles today's stats; the button keeps its own click
         stack.addArrangedSubview(foot)
 
+
         // today's numbers: hidden until the footer is clicked, remembered
         statsWrap.orientation = .horizontal
         statsWrap.alignment = .centerX
@@ -720,6 +800,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         statsWrap.addArrangedSubview(statsLine)
         statsWrap.isHidden = !showStats
         stack.addArrangedSubview(statsWrap)
+
+        // theme swatches, always present; click one to switch the look
+        themeRow.orientation = .horizontal
+        themeRow.alignment = .centerX
+        themeRow.spacing = 4
+        themeRow.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
+        for p in C.presets {
+            let sw = Swatch(p)
+            sw.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            sw.heightAnchor.constraint(equalToConstant: 18).isActive = true
+            let name = p.name.lowercased()
+            sw.toolTip = "Theme: " + p.name
+            sw.onPick = { [weak self] in self?.applyTheme(name, accent: nil, bg: nil) }
+            themeRow.addArrangedSubview(sw)
+            themeSwatches.append(sw)
+        }
+        let custom = CustomSwatch()
+        custom.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        custom.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        custom.toolTip = "Custom theme…"
+        custom.onPick = { [weak self] in self?.customTheme() }
+        themeRow.addArrangedSubview(custom)
+        customSwatch = custom
+        // Fixed geometry: the row is a plain 18pt strip of swatches at the bottom of the card.
+        themeRow.orientation = .horizontal
+        themeRow.alignment = .centerY
+        themeRow.spacing = 6
+        themeRow.distribution = .fill
+        themeRow.translatesAutoresizingMaskIntoConstraints = false
+        themeRow.widthAnchor.constraint(equalToConstant: 6 * 18 + 5 * 6).isActive = true
+        themeRow.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        stack.addArrangedSubview(themeRow)
 
         let content = panel.contentView!
         content.addSubview(stack)
@@ -731,6 +843,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         ])
         rebuildList()
     }
+    let themeRow = NSStackView() // also gets .horizontal in buildUI, before it joins the vertical stack
+    var themeSwatches: [Swatch] = []
+    var customSwatch: CustomSwatch?
     let bar = DrainBar() // animated time-left strip
     let stateLabel = NSTextField(labelWithString: "")
     let mark = Wordmark() // POMO under the clock, each letter a length toggle
@@ -995,6 +1110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
             + (autoFocus ? " · auto" : "")
         stateLabel.textColor = runningBreak ? C.green : running || paused > 0 ? C.accent : C.faint
         mark.state = Wordmark.State(running: running, isBreak: runningBreak, minutes: doneBlock ? breakMinutes : focusMinutes)
+        for sw in themeSwatches { sw.chosen = sw.palette.name.lowercased() == C.theme.name.lowercased() }
+        customSwatch?.chosen = C.theme.name == "Custom"
         setDimmed(running && !runningBreak) // focus: the list steps back, the clock is the only bright thing
         // Time-left strip, updated before the end-of-block handoff below starts the next phase in this same pass.
         bar.colour = runningBreak ? C.green : C.accent
@@ -1121,7 +1238,8 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         guard let button = item.button else { return }
         button.target = self
         button.action = #selector(click)
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.sendAction(on: [.leftMouseUp])
+        watchRightClicks()
         button.image = nil
         button.attributedTitle = wordmark() // the letters themselves are the menu-bar item
         item.length = 58
@@ -1153,17 +1271,28 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         return s
     }
 
-    // Left-click: the menu. Right-click (or hold Option): show/hide the panel.
+    // The status button reports right-clicks as .otherMouseUp through a Button action, or as Control subclasses:
+    // catch the right-button press locally while the pointer is on the item, and open the menu ourselves.
+    func watchRightClicks() {
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .otherMouseDown]) { [weak self] e in
+            guard let self, e.window === self.item.button?.window, let button = self.item.button,
+                  button.convert(e.locationInWindow, from: nil).x >= 0, button.convert(e.locationInWindow, from: nil).x <= button.bounds.width,
+                  button.convert(e.locationInWindow, from: nil).y >= 0, button.convert(e.locationInWindow, from: nil).y <= button.bounds.height else { return e }
+            self.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+            return nil
+        }
+        monitors.append(monitor as Any)
+    }
+    var monitors: [Any] = []
+
+    // Left-click: the menu. Option-click: show/hide the panel.
     @objc func click() {
         let e = NSApp.currentEvent
-        if e?.type == .rightMouseUp || e?.modifierFlags.contains(.option) == true {
-            item.menu = nil
+        if e?.modifierFlags.contains(.option) == true {
             (NSApp.delegate as? AppDelegate)?.togglePanel()
             return
         }
-        item.menu = menu // drop the menu, then take it away so the button keeps its click action
-        item.button?.performClick(nil)
-        item.menu = nil
+        if let button = item.button { menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button) }
     }
 
     // A letter = a favourite length. When the break is next (or running), a small letter sets the 5 min break instead.
@@ -1177,7 +1306,7 @@ final class MenuBar: NSObject, NSApplicationDelegate {
 
     func update(running: Bool, isBreak: Bool, left: Int, title: String) {
         toggleItem.title = running ? (isBreak ? "End break" : "Pause") : title == "break ready" ? "Start break" : "Start timer"
-        clockItem.title = title
+        clockItem.title = title + " · " + C.theme.name
         guard let d = NSApp.delegate as? AppDelegate else { return }
         pinItem.state = d.pinnedCountdown ? .on : .off
         autoItem.state = d.autoFocus ? .on : .off
