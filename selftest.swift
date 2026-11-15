@@ -26,6 +26,7 @@ let checks = #"""
     check(d.listHeight.constant == 3 * C.row && d.listHost.arrangedSubviews.count == 1, "window follows list with 3-row minimum")
     // Timer rhythm: preset sets 25, Start runs it, end of block -> automatic 5 min break, end of break -> next focus.
     d.store.removeObject(forKey: "break") // fresh rhythm: default 5 min break
+    d.store.set(5.0, forKey: "break") // this check needs the 5 min break whatever an earlier run left behind
     d.setBreak(5); d.workingBreak = 5; d.focus = 0; d.end = .distantPast; d.doneBlock = false; d.running = false; d.paused = 0; d.runningBreak = false
     d.preset(25)
     check(d.focusMinutes == 25 && d.clock.stringValue.hasPrefix("25:00"), "25 min preset on the clock")
@@ -44,7 +45,7 @@ let checks = #"""
     check(d.running && !d.runningBreak && Int(d.end.timeIntervalSinceNow) <= held, "resume continues from the pause")
     d.end = .distantPast // past the end: refresh treats it as finished
     d.refresh() // focus ends -> break
-    check(d.running && d.runningBreak, "focus end auto-starts a break (cycle=\(d.cycle))")
+    check(d.running && d.runningBreak && d.workingBreak == 5, "focus end auto-starts a break (cycle=\(d.cycle), break \(d.workingBreak))")
     check(Int(d.end.timeIntervalSinceNow.rounded()) == 5 * 60, "break is 5 min")
     d.end = .distantPast // break finished
     d.refresh() // break ends -> next focus
@@ -103,7 +104,17 @@ let checks = #"""
     d.store.set([["  ", false], ["ok", false], ["x" + String(repeating: "y", count: 500), false]], forKey: "tasks")
     let app2 = AppDelegate() // a fresh launch reads that garbage at init; it must not throw
     _ = app2
-    print("all to-do, timer, strip, stats and robustness checks passed")
+    // Themes: presets switch the palette, a custom accent wins, and the choice is what a relaunch reads.
+    d.applyTheme("slate", accent: nil, bg: nil)
+    check(C.theme.name == "Slate" && C.accent != NSColor(srgbRed: 0.95, green: 0.55, blue: 0.28, alpha: 1), "preset theme applies: \(C.theme.name)")
+    d.applyTheme("custom", accent: C.colour("#33CC99"), bg: C.colour("#101820"))
+    check(C.theme.name == "Custom" && C.hex(C.accent) == "#33CC99" && C.hex(C.bg) == "#101820", "custom theme: \(C.theme.name) accent \(C.hex(C.accent))")
+    check(d.store.string(forKey: "theme") == "custom" && d.store.string(forKey: "accent") == "#33CC99", "theme choice is saved for the next launch")
+    d.applyTheme("paper", accent: nil, bg: nil)
+    check(C.bg.isLight && C.text.isLight == false, "light preset flips the text to dark ink")
+    d.applyTheme("ember", accent: nil, bg: nil)
+    check(C.theme.name == "Ember" && C.hex(C.accent) == "#F28C47", "back to the default look")
+    print("all to-do, timer, strip, stats, theme and robustness checks passed")
     exit(0)
 """#
 

@@ -1,18 +1,84 @@
 // Pomo: always-on-top pomodoro + checklist. Build/run: ./build.sh
 import AppKit
 
+// The palette, switchable at runtime: presets or a custom look (see C.apply).
+struct Palette {
+    var name = "Ember"
+    var bg = NSColor(white: 0.065, alpha: 1)
+    var card = NSColor(white: 0.14, alpha: 1)
+    var control = NSColor(white: 0.2, alpha: 1)
+    var accent = NSColor(red: 0.95, green: 0.55, blue: 0.28, alpha: 1) // runs, strip, the active letter
+    var green = NSColor(red: 0.42, green: 0.78, blue: 0.52, alpha: 1) // breaks
+    var text = NSColor(white: 0.94, alpha: 1)
+    var dim = NSColor(white: 0.62, alpha: 1)
+    var faint = NSColor(white: 0.38, alpha: 1)
+}
+
 enum C {
-    static let bg = NSColor(white: 0.065, alpha: 1)
-    static let card = NSColor(white: 0.14, alpha: 1)
-    static let control = NSColor(white: 0.2, alpha: 1)
-    static let accent = NSColor(red: 0.95, green: 0.55, blue: 0.28, alpha: 1) // warm orange, used at rest and in focus
-    static let green = NSColor(red: 0.42, green: 0.78, blue: 0.52, alpha: 1) // breaks only
-    static let text = NSColor(white: 0.94, alpha: 1)
-    static let dim = NSColor(white: 0.62, alpha: 1)
-    static let faint = NSColor(white: 0.38, alpha: 1)
+    static var theme = Palette()
+    static var bg: NSColor { theme.bg }
+    static var card: NSColor { theme.card }
+    static var control: NSColor { theme.control }
+    static var accent: NSColor { theme.accent }
+    static var green: NSColor { theme.green }
+    static var text: NSColor { theme.text }
+    static var dim: NSColor { theme.dim }
+    static var faint: NSColor { theme.faint }
     static let hairline = NSColor(white: 1, alpha: 0.08)
     static let row = 24.0 // to-do row height
     static let width = 236.0
+
+    static let presets: [Palette] = [
+        Palette(), // Ember: the original warm orange on near-black
+        Palette(name: "Slate", bg: NSColor(white: 0.10, alpha: 1), card: NSColor(white: 0.17, alpha: 1), control: NSColor(white: 0.23, alpha: 1),
+                accent: NSColor(srgbRed: 0.55, green: 0.72, blue: 0.98, alpha: 1), green: NSColor(srgbRed: 0.45, green: 0.8, blue: 0.72, alpha: 1)),
+        Palette(name: "Forest", bg: NSColor(srgbRed: 0.07, green: 0.10, blue: 0.09, alpha: 1), card: NSColor(srgbRed: 0.12, green: 0.16, blue: 0.14, alpha: 1),
+                control: NSColor(srgbRed: 0.17, green: 0.22, blue: 0.19, alpha: 1),
+                accent: NSColor(srgbRed: 0.45, green: 0.82, blue: 0.62, alpha: 1), green: NSColor(srgbRed: 0.62, green: 0.85, blue: 0.5, alpha: 1)),
+        Palette(name: "Sakura", bg: NSColor(srgbRed: 0.09, green: 0.07, blue: 0.09, alpha: 1), card: NSColor(srgbRed: 0.15, green: 0.12, blue: 0.15, alpha: 1),
+                control: NSColor(srgbRed: 0.22, green: 0.17, blue: 0.22, alpha: 1),
+                accent: NSColor(srgbRed: 0.95, green: 0.55, blue: 0.72, alpha: 1), green: NSColor(srgbRed: 0.6, green: 0.85, blue: 0.72, alpha: 1)),
+        Palette(name: "Paper", bg: NSColor(white: 0.95, alpha: 1), card: NSColor(white: 0.88, alpha: 1), control: NSColor(white: 0.8, alpha: 1),
+                accent: NSColor(srgbRed: 0.85, green: 0.36, blue: 0.2, alpha: 1), green: NSColor(srgbRed: 0.25, green: 0.58, blue: 0.4, alpha: 1)),
+    ]
+
+    // "#RRGGBB" out, NSColor in (nil for anything malformed).
+    static func hex(_ c: NSColor) -> String {
+        let c = c.usingColorSpace(.sRGB) ?? c
+        return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+    }
+    static func colour(_ hex: String) -> NSColor? {
+        var h = hex.trimmingCharacters(in: .whitespaces).uppercased()
+        if h.hasPrefix("#") { h.removeFirst() }
+        if h.count == 3 { h = h.map { String($0) + String($0) }.joined() }
+        guard h.count == 6, let n = Int(h, radix: 16) else { return nil }
+        return NSColor(srgbRed: CGFloat((n >> 16) & 0xFF) / 255, green: CGFloat((n >> 8) & 0xFF) / 255, blue: CGFloat(n & 0xFF) / 255, alpha: 1)
+    }
+
+    // "theme" = ember|slate|forest|sakura|paper|custom; any theme also accepts an "accent" override.
+    static func apply(_ store: UserDefaults) {
+        let wanted = (store.string(forKey: "theme") ?? "ember").lowercased()
+        theme = presets.first { $0.name.lowercased() == wanted } ?? presets[0]
+        if wanted == "custom" {
+            theme.name = "Custom"
+            if let bg = colour(store.string(forKey: "bg") ?? "") {
+                theme.bg = bg
+                theme.card = bg.blended(withFraction: 0.12, of: .white) ?? bg
+                theme.control = bg.blended(withFraction: 0.22, of: .white) ?? bg
+            }
+        }
+        if let accent = colour(store.string(forKey: "accent") ?? "") { theme.accent = accent }
+        theme.text = theme.bg.isLight ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.94, alpha: 1)
+        theme.dim = theme.bg.isLight ? NSColor(white: 0.42, alpha: 1) : NSColor(white: 0.62, alpha: 1)
+        theme.faint = theme.bg.isLight ? NSColor(white: 0.58, alpha: 1) : NSColor(white: 0.38, alpha: 1)
+    }
+}
+
+extension NSColor {
+    var isLight: Bool {
+        let c = usingColorSpace(.sRGB) ?? self
+        return 0.299 * c.redComponent + 0.587 * c.greenComponent + 0.114 * c.blueComponent > 0.6
+    }
 }
 
 final class Field: NSTextField {
@@ -255,22 +321,22 @@ final class Wordmark: NSView {
     override func mouseDown(with e: NSEvent) { onLetter?(Wordmark.letters[index(at: convert(e.locationInWindow, from: nil))].1) }
 
     override func draw(_ rect: NSRect) {
-        // rounded display face, black-weight: the only "funky" type in the panel
-        let font = NSFont.systemFont(ofSize: 15, weight: .black).rounded
         let cell = bounds.width / 4
+        let letterFont = NSFont.systemFont(ofSize: 15, weight: .black).rounded
         for (i, (ch, minutes)) in Wordmark.letters.enumerated() {
             let selected = minutes == state.minutes
-            let color: NSColor = selected ? C.accent : hovered == i ? C.text : state.running ? C.dim : NSColor(white: 0.62, alpha: 1)
-            let s = NSAttributedString(string: ch, attributes: [.font: font, .foregroundColor: color, .kern: 2.5])
-            let size = s.size()
-            let glyphX = CGFloat(i) * cell + (cell - size.width) / 2
-            s.draw(at: NSPoint(x: glyphX, y: (bounds.height - size.height) / 2))
-            if selected { // underline sits centred under the letter's own ink, not the cell or the kerned text box
-                let lineW: CGFloat = 12
-                let ink = s.boundingRect(with: NSSize(width: 999, height: 999), options: [.usesLineFragmentOrigin, .usesFontLeading])
-                let inkX = ink.width > 0 ? glyphX + ink.midX : glyphX + size.width / 2
-                C.accent.setFill()
-                NSBezierPath(roundedRect: NSRect(x: inkX - lineW / 2, y: 1, width: lineW, height: 1.5), xRadius: 0.75, yRadius: 0.75).fill()
+            let color: NSColor = selected ? C.accent : hovered == i ? C.text : state.running ? C.dim : C.dim
+            // One text box per letter, centred in its cell. The underline is measured from the same box that
+            // draws the letter, so the rule always sits exactly under the stroke and shares its centre.
+            let attrs: [NSAttributedString.Key: Any] = [.font: letterFont, .foregroundColor: color]
+            let glyph = NSAttributedString(string: ch, attributes: attrs)
+            let size = glyph.size()
+            let x = CGFloat(i) * cell + (cell - size.width) / 2
+            let y = (bounds.height - size.height) / 2
+            glyph.draw(at: NSPoint(x: x, y: y))
+            if selected { // the letter's own underline style: tracked by the text system, never by hand
+                NSAttributedString(string: ch, attributes: attrs.merging([.underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: C.accent]) { $1 })
+                    .draw(at: NSPoint(x: x, y: y))
             }
         }
     }
@@ -362,7 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         panel.titleVisibility = .hidden
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.appearance = NSAppearance(named: .darkAqua) // dark even in light mode
+        panel.appearance = NSAppearance(named: C.bg.isLight ? .aqua : .darkAqua)
         panel.contentView!.wantsLayer = true
         panel.contentView!.layer?.cornerRadius = 0
         panel.backgroundColor = C.bg
@@ -374,6 +440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         panel.delegate = self
         panel.minSize = NSSize(width: C.width, height: 0)
 
+        C.apply(store)
         focus = store.double(forKey: "focus")
         if focus.isNaN || focus < 60 || focus > 999 * 60 { focus = 0 } // corrupt value -> default 25 min
         if let live = store.object(forKey: "handoffEnd") as? Date, live > Date(), !running { // quit while running: keep it
@@ -442,6 +509,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     // Pinned mode keeps exactly one running copy. A newly launched instance asks the existing one to hand over:
     // it saves its live countdown on the way out, and this one adopts it before building its UI.
     // Shortcut: a hung old copy is force-quit after 1s, and the persisted pause state is used instead.
+    // Switch look at runtime: persist the choice, repaint the panel and its subviews.
+    func applyTheme(_ name: String, accent: NSColor?, bg: NSColor?) {
+        store.set(name, forKey: "theme")
+        if let a = accent { store.set(C.hex(a), forKey: "accent") } else { store.removeObject(forKey: "accent") }
+        if let b = bg { store.set(C.hex(b), forKey: "bg") } else { store.removeObject(forKey: "bg") }
+        C.apply(store)
+        panel.appearance = NSAppearance(named: C.bg.isLight ? .aqua : .darkAqua)
+        panel.backgroundColor = C.bg
+        restyle()
+        refresh()
+        rebuildList() // rows draw their own colours
+    }
+
+    // Push the current palette into views that cached colours at build time.
+    func restyle() {
+        clock.textColor = C.text
+        leftLbl.textColor = C.faint
+        stateLabel.textColor = C.faint
+        updateStats()
+        entry.textColor = C.text
+        entry.placeholderAttributedString = NSAttributedString(string: "  New to-do", attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: C.faint])
+        clearBtn.contentTintColor = C.dim
+        panel.contentView?.needsDisplay = true
+        stack.needsDisplay = true
+        mark.needsDisplay = true
+        bar.needsDisplay = true
+    }
+
     func setPinned(_ on: Bool) {
         store.set(on, forKey: "pinMenuBar")
         refresh()
@@ -1012,9 +1107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 @MainActor
 final class MenuBar: NSObject, NSApplicationDelegate {
     static let letters: [(String, Int)] = [("P", 60), ("O", 25), ("M", 15), ("O", 5)] // letter, minutes
-    let item = NSStatusBar.system.statusItem(withLength: 70) // the wordmark plus the menu chevron
-    let length: CGFloat = 70
-    let view = MenuBarView()
+    let item = NSStatusBar.system.statusItem(withLength: 58) // P O M O
     let menu = NSMenu()
     let clockItem = NSMenuItem(title: "25:00", action: nil, keyEquivalent: "")
     let toggleItem = NSMenuItem(title: "Start", action: #selector(startPause), keyEquivalent: "p")
@@ -1022,29 +1115,55 @@ final class MenuBar: NSObject, NSApplicationDelegate {
     let autoItem = NSMenuItem(title: "Automatic rhythm", action: #selector(toggleAuto), keyEquivalent: "")
     let showItem = NSMenuItem(title: "Show Pomo", action: #selector(show), keyEquivalent: "")
     let resetItem = NSMenuItem(title: "Reset today's stats", action: #selector(resetStats), keyEquivalent: "")
+    let themeItem = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_: Notification) {
         guard let button = item.button else { return }
-        button.title = "" // subview only: AppKit hides custom subviews behind an image or title
+        button.target = self
+        button.action = #selector(click)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.image = nil
-        view.onLetter = { [weak self] minutes in self?.setLength(minutes) }
-        view.onMenu = { [weak self] in self?.popMenu() }
-        button.addSubview(view)
-        view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: button.leadingAnchor), view.trailingAnchor.constraint(equalTo: button.trailingAnchor),
-            view.topAnchor.constraint(equalTo: button.topAnchor), view.bottomAnchor.constraint(equalTo: button.bottomAnchor),
-        ])
+        button.attributedTitle = wordmark() // the letters themselves are the menu-bar item
+        item.length = 58
         clockItem.isEnabled = false
         toggleItem.target = self
         pinItem.target = self
         autoItem.target = self
-        showItem.target = self
         resetItem.target = self
-        for m in [clockItem, toggleItem, .separator(), pinItem as NSMenuItem, autoItem, resetItem, .separator(), showItem,
-                  NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")] {
+        showItem.target = self
+        themeItem.submenu?.items.forEach { $0.target = self }
+        let quitItem = NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        for m in [clockItem, toggleItem, .separator(), pinItem as NSMenuItem, autoItem, resetItem, themeItem, .separator(), showItem, quitItem] {
             menu.addItem(m)
         }
+    }
+
+    // P O M O, with the active length in the theme accent.
+    func wordmark() -> NSAttributedString {
+        let size = NSFont.systemFontSize(for: .small) + 1
+        let font = NSFont.systemFont(ofSize: size + 1, weight: .semibold)
+        let current = (NSApp.delegate as? AppDelegate).map { $0.doneBlock ? $0.breakMinutes : $0.focusMinutes } ?? 25
+        let s = NSMutableAttributedString()
+        for (ch, minutes) in MenuBar.letters {
+            s.append(NSAttributedString(string: ch + " ", attributes: [
+                .font: font,
+                .foregroundColor: minutes == current ? C.accent : NSColor.labelColor,
+            ]))
+        }
+        return s
+    }
+
+    // Left-click: the menu. Right-click (or hold Option): show/hide the panel.
+    @objc func click() {
+        let e = NSApp.currentEvent
+        if e?.type == .rightMouseUp || e?.modifierFlags.contains(.option) == true {
+            item.menu = nil
+            (NSApp.delegate as? AppDelegate)?.togglePanel()
+            return
+        }
+        item.menu = menu // drop the menu, then take it away so the button keeps its click action
+        item.button?.performClick(nil)
+        item.menu = nil
     }
 
     // A letter = a favourite length. When the break is next (or running), a small letter sets the 5 min break instead.
@@ -1062,7 +1181,11 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         guard let d = NSApp.delegate as? AppDelegate else { return }
         pinItem.state = d.pinnedCountdown ? .on : .off
         autoItem.state = d.autoFocus ? .on : .off
-        view.state = MenuBarView.State(running: running, isBreak: isBreak, focusMinutes: d.doneBlock ? d.breakMinutes : d.focusMinutes, title: title)
+        switch C.theme.name.lowercased() {
+        case "custom": themeItem.title = "Theme: Custom"
+        default: themeItem.title = "Theme: " + C.theme.name
+        }
+        item.button?.attributedTitle = wordmark()
         item.button?.toolTip = "POMO · " + title
     }
 
@@ -1078,6 +1201,31 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         d.setPinned(!d.pinnedCountdown)
     }
     @objc func show() { (NSApp.delegate as? AppDelegate)?.showPanel() }
+
+    @objc func pickTheme(_ item: NSMenuItem) {
+        (NSApp.delegate as? AppDelegate)?.applyTheme(item.representedObject as? String ?? "ember", accent: nil, bg: nil)
+    }
+
+    // Custom look: a colour well for the accent (and one for the background), applied live.
+    @objc func customTheme() {
+        guard let d = NSApp.delegate as? AppDelegate else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Custom theme"
+        alert.informativeText = "Pick an accent and a background colour."
+        let accent = NSColorWell(frame: NSRect(x: 0, y: 34, width: 44, height: 24))
+        accent.color = C.accent
+        let bg = NSColorWell(frame: NSRect(x: 52, y: 34, width: 44, height: 24))
+        bg.color = C.bg
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 104, height: 60))
+        view.addSubview(accent)
+        view.addSubview(bg)
+        alert.accessoryView = view
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        d.applyTheme("custom", accent: accent.color, bg: bg.color)
+    }
 
     // Stats: "Reset today's stats" clears the tally after a one-click confirmation.
     @objc func resetStats() {
@@ -1095,50 +1243,6 @@ final class MenuBar: NSObject, NSApplicationDelegate {
 
 // The wordmark, drawn: P O M O each 14pt wide, then a dot that opens the menu. Selected letter is accented;
 // red while a focus block runs.
-@MainActor
-final class MenuBarView: NSView {
-    struct State { var running = false; var isBreak = false; var focusMinutes = 25; var title = "" }
-    var state = State() { didSet { needsDisplay = true } }
-    var onLetter: ((Int) -> Void)?
-    var onMenu: (() -> Void)?
-    private var hovering = false { didSet { needsDisplay = true } }
-    private var tracking: NSTrackingArea?
-    private let letterWidth: CGFloat = 15
-
-    override var isFlipped: Bool { false }
-    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        tracking.map(removeTrackingArea)
-        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
-        addTrackingArea(t)
-        tracking = t
-    }
-    override func mouseEntered(with _: NSEvent) { hovering = true }
-    override func mouseExited(with _: NSEvent) { hovering = false }
-
-    // Drawn as text, not an image: on a dark menu bar it stays legible, and the O of the current length is orange.
-    override func draw(_ rect: NSRect) {
-        let font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
-        let base = hovering ? NSColor.labelColor : NSColor(white: 0.92, alpha: 1)
-        var x: CGFloat = 6
-        for (ch, minutes) in MenuBar.letters {
-            let isCurrent = minutes == state.focusMinutes
-            let color = isCurrent ? C.accent : state.running && !state.isBreak ? NSColor(white: 0.55, alpha: 1) : base
-            NSAttributedString(string: ch, attributes: [.font: font, .foregroundColor: color]).draw(at: NSPoint(x: x, y: 2))
-            x += letterWidth
-        }
-        NSAttributedString(string: "⌄", attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                                                     .foregroundColor: NSColor(white: 0.6, alpha: 1)])
-            .draw(at: NSPoint(x: x + 3, y: 2))
-    }
-    override func mouseDown(with e: NSEvent) {
-        let x = convert(e.locationInWindow, from: nil).x - 6
-        if x >= letterWidth * 4 { onMenu?(); return }
-        onLetter?(MenuBar.letters[max(0, min(3, Int(x / letterWidth)))].1)
-    }
-}
 
 MainActor.assumeIsolated {
     let app = NSApplication.shared

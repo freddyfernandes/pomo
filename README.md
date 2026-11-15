@@ -28,6 +28,12 @@ git clone https://github.com/freddyfernandes/pomo && cd pomo
 
 Settings live in `defaults` domain `local.pomo`; `defaults delete local.pomo` resets everything.
 
+### Looks
+
+Menu bar → **Theme**: `Ember` (default, warm orange on near-black), `Slate` (cool blue-grey),
+`Forest` (green), `Sakura` (pink), `Paper` (light), or **Custom…** to pick an accent and background colour.
+The choice is saved. From a shell: `defaults write local.pomo theme slate` (or `accent "#33CC99"` for any theme).
+
 ### Windows (overlay)
 
 A native Windows overlay lives in [`windows/`](windows): one C# file, drawn with the Windows Forms that
