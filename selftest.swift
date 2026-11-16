@@ -150,6 +150,13 @@ let checks = #"""
     } else {
         print("skip  theme menu (no menu bar in this harness)")
     }
+    // The card grows when the stats line opens, so it must not be clipped under the footer.
+    d.showStats = false; d.statsWrap.isHidden = true; d.autoHeight(); RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    let closed = d.panel.contentLayoutRect.height
+    d.toggleStats(); RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    let opened = d.panel.contentLayoutRect.height
+    check(!d.statsWrap.isHidden && opened > closed && d.statsWrap.frame.maxY <= opened + 1, "opening stats grows the card (closed=\(Int(closed)) open=\(Int(opened)), stats bottom=\(Int(d.statsWrap.frame.maxY)))")
+    d.toggleStats()
     print("all to-do, timer, strip, stats, theme, dual-tone, manual-time and robustness checks passed")
     exit(0)
 """#
@@ -180,6 +187,7 @@ guard compile() == 0 else { print("build failed"); exit(1) }
 
 let run = Process()
 run.executableURL = bin
+run.environment = ProcessInfo.processInfo.environment.merging(["TMPDIR": root.path + "/"]) { $1 } // module cache inside the repo: works without full disk access
 try! run.run()
 run.waitUntilExit()
 exit(run.terminationStatus)

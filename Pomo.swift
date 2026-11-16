@@ -245,6 +245,7 @@ final class Flipped: NSView { override var isFlipped: Bool { true } }
 
 // The card background, under everything: one colour, or a soft vertical fade for dual-tone themes.
 final class Backdrop: NSView {
+    override var isOpaque: Bool { true } // the card is fully painted here: no see-through, no stale pixels
     override func draw(_ rect: NSRect) {
         C.bg.setFill()
         NSBezierPath(rect: bounds).fill()
@@ -875,10 +876,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     var showStats = UserDefaults.standard.bool(forKey: "showStats") // remembered, hidden by default
 
     @objc func toggleStats() {
-        showStats.toggle()
+        showStats = !showStats
         UserDefaults.standard.set(showStats, forKey: "showStats")
-        updateStats()
         statsWrap.isHidden = !showStats
+        updateStats() // fills the line once the row can show it
         autoHeight()
     }
 
@@ -898,6 +899,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     // "2 pomos · 52 min focus · 3 done today" — minutes include the block running right now.
     func updateStats() {
         guard showStats else { return }
+        if statsWrap.isHidden && !statsLine.stringValue.isEmpty { statsWrap.isHidden = false; autoHeight() } // reopening fits the card
         if shownDayKey != dayKey { // midnight passed since the line was last drawn
             shownDayKey = dayKey
             day = store.dictionary(forKey: dayKey) ?? [:]
