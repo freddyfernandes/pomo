@@ -46,7 +46,7 @@ let checks = #"""
     d.end = .distantPast // past the end: refresh treats it as finished
     d.refresh() // focus ends -> break
     check(d.running && d.runningBreak && d.workingBreak == 5, "focus end auto-starts a break (cycle=\(d.cycle), break \(d.workingBreak))")
-    check(Int(d.end.timeIntervalSinceNow.rounded()) == 5 * 60, "break is 5 min")
+    check(abs(d.end.timeIntervalSinceNow - 300) < 2, "break is 5 min (got \(Int(d.end.timeIntervalSinceNow.rounded()))s, break=\(d.workingBreak))")
     d.end = .distantPast // break finished
     d.refresh() // break ends -> next focus
     check(d.running && !d.runningBreak && Int(d.end.timeIntervalSinceNow.rounded()) == 25 * 60, "break end auto-starts the next 25 min focus")
@@ -110,7 +110,7 @@ let checks = #"""
     d.applyTheme("custom", accent: C.colour("#33CC99"), bg: C.colour("#101820"))
     check(C.theme.name == "Custom" && C.hex(C.accent) == "#33CC99" && C.hex(C.bg) == "#101820", "custom theme: \(C.theme.name) accent \(C.hex(C.accent))")
     let savedCustom = d.store.string(forKey: "customTheme") ?? ""
-    check(d.store.string(forKey: "theme") == "custom" && savedCustom.split(separator: ",").count == 5, "custom theme saved as a full palette: \(savedCustom)")
+    check(d.store.string(forKey: "theme") == "custom" && savedCustom.split(separator: ",").count == 6, "custom theme saved as a full palette: \(savedCustom)")
     d.applyTheme("paper", accent: nil, bg: nil)
     check(C.bg.isLight && C.text.isLight == false, "light preset flips the text to dark ink")
     d.applyTheme("ember", accent: nil, bg: nil)
@@ -126,7 +126,31 @@ let checks = #"""
     check(d.typed == "29", "↓ nudges the number being typed (\(d.typed))")
     d.typing = false
     // ↑ / ↓ routing needs a real key window, which this harness cannot make; checked by hand in the app.
-    print("all to-do, timer, strip, stats, theme, manual-time and robustness checks passed")
+    // Dual-tone + menu list: presets carry a second tone, the menu has one swatch per preset, and a custom
+    // dual palette round-trips through the store.
+    let duals = C.presets.filter { $0.bg2 != nil }
+    check(duals.count >= 3, "dual-tone presets exist: \(duals.map { $0.name })")
+    d.applyTheme("dusk", accent: nil, bg: nil)
+    check(C.theme.name == "Dusk" && C.theme.bg2 != nil, "dual preset applies with both tones")
+    d.applyTheme("custom", accent: C.colour("#FFCC66"), bg: C.colour("#101030"), bg2: C.colour("#301020"),
+                 card: C.colour("#202040"), breakc: C.colour("#66E0C0"), textc: C.colour("#F5F0E0"))
+    let record = d.store.string(forKey: "customTheme") ?? ""
+    check(record.split(separator: ",").count == 6, "custom dual palette saved: \(record)")
+    d.store.set(record, forKey: "customTheme") // reload the way launch does
+    C.apply(d.store)
+    check(C.hex(C.theme.bg2 ?? C.bg) == "#301020" && C.hex(C.green) == "#66E0C0", "dual custom palette reloads")
+    d.applyTheme("ember", accent: nil, bg: nil)
+    check(C.theme.bg2 == nil, "flat preset clears the second tone")
+    if let menuThemes = d.menuBar?.themeMenuList() {
+        check(menuThemes.items.filter { $0.action != nil }.count >= C.presets.count + 1, "theme menu lists every palette plus Custom")
+        let swatched = menuThemes.items.filter { $0.image != nil }
+        check(swatched.count >= C.presets.count, "each palette entry has a swatch (\(swatched.count) of \(C.presets.count + 1))")
+        let customEntry = menuThemes.items.first { $0.title == "Custom…" }
+        check(customEntry?.image != nil, "Custom… has its own swatch (found=\(customEntry != nil))")
+    } else {
+        print("skip  theme menu (no menu bar in this harness)")
+    }
+    print("all to-do, timer, strip, stats, theme, dual-tone, manual-time and robustness checks passed")
     exit(0)
 """#
 

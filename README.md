@@ -31,8 +31,9 @@ Settings live in `defaults` domain `local.pomo`; `defaults delete local.pomo` re
 
 ### Looks
 
-Menu bar → **Theme**: `Ember` (default, warm orange on near-black), `Slate`, `Forest`, `Sakura`, `Paper` (light),
-or **Custom…** — five colour wells (background, card, accent, break, text) to build your own combo.
+Menu bar → **Theme**: a scrolling list with a swatch per palette — `Ember` (default), `Slate`, `Forest`, `Sakura`,
+`Paper` (light), and the dual-tone `Dusk`, `Moss`, `Lagoon` (the card fades from one tone into another).
+**Custom…** has six wells: top, bottom, card, accent, break, text — equal top/bottom gives a flat card.
 The card stays clean; looks are picked from the menu bar. The choice is saved, and scriptable too:
 `defaults write local.pomo theme slate`.
 

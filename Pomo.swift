@@ -5,6 +5,7 @@ import AppKit
 struct Palette {
     var name = "Ember"
     var bg = NSColor(white: 0.065, alpha: 1)
+    var bg2: NSColor? // set on dual-tone themes: the card fades from bg (top) to bg2 (bottom)
     var card = NSColor(white: 0.14, alpha: 1)
     var control = NSColor(white: 0.2, alpha: 1)
     var accent = NSColor(red: 0.95, green: 0.55, blue: 0.28, alpha: 1) // runs, strip, the active letter
@@ -40,6 +41,13 @@ enum C {
                 accent: NSColor(srgbRed: 0.95, green: 0.55, blue: 0.72, alpha: 1), green: NSColor(srgbRed: 0.6, green: 0.85, blue: 0.72, alpha: 1)),
         Palette(name: "Paper", bg: NSColor(white: 0.95, alpha: 1), card: NSColor(white: 0.88, alpha: 1), control: NSColor(white: 0.8, alpha: 1),
                 accent: NSColor(srgbRed: 0.85, green: 0.36, blue: 0.2, alpha: 1), green: NSColor(srgbRed: 0.25, green: 0.58, blue: 0.4, alpha: 1)),
+        // dual-tone: the card fades from `bg` at the top to `bg2` at the bottom
+        Palette(name: "Dusk", bg: NSColor(srgbRed: 0.10, green: 0.08, blue: 0.18, alpha: 1), bg2: NSColor(srgbRed: 0.26, green: 0.12, blue: 0.16, alpha: 1),
+                accent: NSColor(srgbRed: 1.0, green: 0.62, blue: 0.42, alpha: 1), green: NSColor(srgbRed: 0.55, green: 0.85, blue: 0.8, alpha: 1)),
+        Palette(name: "Moss", bg: NSColor(srgbRed: 0.05, green: 0.12, blue: 0.10, alpha: 1), bg2: NSColor(srgbRed: 0.16, green: 0.13, blue: 0.06, alpha: 1),
+                accent: NSColor(srgbRed: 0.85, green: 0.78, blue: 0.4, alpha: 1), green: NSColor(srgbRed: 0.55, green: 0.9, blue: 0.6, alpha: 1)),
+        Palette(name: "Lagoon", bg: NSColor(srgbRed: 0.04, green: 0.10, blue: 0.16, alpha: 1), bg2: NSColor(srgbRed: 0.06, green: 0.22, blue: 0.24, alpha: 1),
+                accent: NSColor(srgbRed: 0.35, green: 0.85, blue: 0.9, alpha: 1), green: NSColor(srgbRed: 0.5, green: 0.95, blue: 0.7, alpha: 1)),
     ]
 
     // "#RRGGBB" out, NSColor in (nil for anything malformed).
@@ -70,12 +78,13 @@ enum C {
         }
         if wanted == "custom", let line = store.string(forKey: "customTheme") {
             let parts = line.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
-            if parts.count == 5 {
+            if parts.count >= 5 {
                 if let c = colour(parts[0]) { theme.bg = c; theme.card = c.blended(withFraction: 0.12, of: .white) ?? c; theme.control = c.blended(withFraction: 0.22, of: .white) ?? c }
                 if let c = colour(parts[1]) { theme.card = c; theme.control = c.blended(withFraction: 0.06, of: .white) ?? c }
                 if let c = colour(parts[2]) { theme.accent = c }
                 if let c = colour(parts[3]) { theme.green = c }
                 theme.text = colour(parts[4]) ?? (theme.bg.isLight ? NSColor(white: 0.12, alpha: 1) : NSColor(white: 0.94, alpha: 1))
+                if parts.count > 5, let second = colour(parts[5]), hex(second) != hex(theme.bg) { theme.bg2 = second } else { theme.bg2 = nil }
             }
         }
         if let accent = colour(store.string(forKey: "accent") ?? "") { theme.accent = accent }
@@ -233,6 +242,17 @@ final class TodoRow: NSControl {
 }
 
 final class Flipped: NSView { override var isFlipped: Bool { true } }
+
+// The card background, under everything: one colour, or a soft vertical fade for dual-tone themes.
+final class Backdrop: NSView {
+    override func draw(_ rect: NSRect) {
+        C.bg.setFill()
+        NSBezierPath(rect: bounds).fill()
+        guard let second = C.theme.bg2 else { return }
+        // The lower half fades from the base colour into the second tone.
+        NSGradient(starting: C.bg, ending: second)?.draw(in: rect, angle: -90) // -90: top colour at the top
+    }
+}
 
 
 
@@ -526,11 +546,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
     // Switch look at runtime: persist the choice, repaint the panel and its subviews.
     // name = a preset, or "custom" with the full set of colours (nil channels fall back to the current ones).
-    func applyTheme(_ name: String, accent: NSColor?, bg: NSColor?, card: NSColor? = nil, breakc: NSColor? = nil, textc: NSColor? = nil) {
+    func applyTheme(_ name: String, accent: NSColor?, bg: NSColor?, bg2: NSColor? = nil, card: NSColor? = nil, breakc: NSColor? = nil, textc: NSColor? = nil) {
         store.set(name, forKey: "theme")
         if name == "custom" {
             let b = bg ?? C.bg, c = card ?? C.card, a = accent ?? C.accent, g = breakc ?? C.green, t = textc ?? C.text
-            store.set([C.hex(b), C.hex(c), C.hex(a), C.hex(g), C.hex(t)].joined(separator: ","), forKey: "customTheme")
+            let second = bg2 ?? b
+            store.set([C.hex(b), C.hex(c), C.hex(a), C.hex(g), C.hex(t), C.hex(second)].joined(separator: ","), forKey: "customTheme")
         } else {
             store.removeObject(forKey: "customTheme")
             if let a = accent { store.set(C.hex(a), forKey: "accent") } else { store.removeObject(forKey: "accent") }
@@ -546,7 +567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     // Everything the window itself owns. Called at launch and after any theme change, so there is one code path.
     func styleChrome() {
         panel.appearance = NSAppearance(named: C.bg.isLight ? .aqua : .darkAqua)
-        panel.backgroundColor = C.bg
+        panel.backgroundColor = C.bg // the solid base; a dual-tone theme fades on top in Backdrop
         clock.textColor = C.text
         stateLabel.textColor = C.faint
         leftLbl.textColor = C.faint
@@ -556,6 +577,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         for b in [up, down] { b.fill = C.card }
         updateStats()
         panel.contentView?.needsDisplay = true
+        backdrop.needsDisplay = true
         stack.needsDisplay = true
         mark.needsDisplay = true
         bar.needsDisplay = true
@@ -694,6 +716,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         entry.action = #selector(self.addTodo)
         entry.placeholderAttributedString = NSAttributedString(string: "  New to-do", attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: C.faint])
         entry.widthAnchor.constraint(equalToConstant: C.width - 24).isActive = true
+        entry.drawsBackground = false // the card behind it (solid or dual-tone) shows through
         stack.addArrangedSubview(entry)
 
         // 4. to-do list
@@ -749,6 +772,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
 
         let content = panel.contentView!
+        content.addSubview(backdrop)
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            backdrop.topAnchor.constraint(equalTo: content.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+        ])
         content.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 4), // nothing may sit above the strip
@@ -758,6 +789,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         ])
         rebuildList()
     }
+    let backdrop = Backdrop() // the card itself: solid, or a two-tone fade for dual-tone themes
     let bar = DrainBar() // animated time-left strip
     let stateLabel = NSTextField(labelWithString: "")
     let mark = Wordmark() // POMO under the clock, each letter a length toggle
@@ -1165,7 +1197,7 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         autoItem.target = self
         resetItem.target = self
         showItem.target = self
-        themeItem.submenu?.items.forEach { $0.target = self }
+        themeItem.submenu = themeMenuList() // presets with swatch icons, then Custom…
         let quitItem = NSMenuItem(title: "Quit Pomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         for m in [clockItem, toggleItem, .separator(), pinItem as NSMenuItem, autoItem, resetItem, themeItem, .separator(), showItem, quitItem] {
             menu.addItem(m)
@@ -1226,9 +1258,9 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         guard let d = NSApp.delegate as? AppDelegate else { return }
         pinItem.state = d.pinnedCountdown ? .on : .off
         autoItem.state = d.autoFocus ? .on : .off
-        switch C.theme.name.lowercased() {
-        case "custom": themeItem.title = "Theme: Custom"
-        default: themeItem.title = "Theme: " + C.theme.name
+        themeItem.title = "Theme: " + C.theme.name
+        for entry in themeItem.submenu?.items ?? [] where entry.action == #selector(pickTheme(_:)) {
+            entry.state = (entry.representedObject as? String) == C.theme.name.lowercased() ? .on : .off
         }
         item.button?.attributedTitle = wordmark()
         item.button?.toolTip = "POMO · " + title
@@ -1247,6 +1279,56 @@ final class MenuBar: NSObject, NSApplicationDelegate {
     }
     @objc func show() { (NSApp.delegate as? AppDelegate)?.showPanel() }
 
+    // One menu entry per palette, each with a 16pt swatch; the menu scrolls if the list grows.
+    func themeMenuList() -> NSMenu {
+        let themes = NSMenu()
+        themes.autoenablesItems = false
+        for p in C.presets {
+            let entry = NSMenuItem(title: p.name + (p.bg2 != nil ? "  · dual" : ""), action: #selector(pickTheme(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = p.name.lowercased()
+            entry.image = swatch(p, plus: false)
+            themes.addItem(entry)
+        }
+        themes.addItem(.separator())
+        let custom = NSMenuItem(title: "Custom…", action: #selector(customTheme), keyEquivalent: "")
+        custom.target = self
+        custom.image = swatch(nil, plus: true)
+        themes.addItem(custom)
+        return themes
+    }
+
+    // A tiny palette preview: the base tone (and its dual second half), accent and break dots.
+    func swatch(_ p: Palette?, plus: Bool) -> NSImage {
+        let img = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+            let r = rect.insetBy(dx: 1, dy: 1)
+            let circle = NSBezierPath(ovalIn: r)
+            guard let p, !plus else {
+                C.card.setFill(); circle.fill()
+                circle.lineWidth = 1; C.dim.setStroke(); circle.stroke()
+                let cross = NSBezierPath()
+                cross.move(to: NSPoint(x: r.midX - 3.5, y: r.midY)); cross.line(to: NSPoint(x: r.midX + 3.5, y: r.midY))
+                cross.move(to: NSPoint(x: r.midX, y: r.midY - 3.5)); cross.line(to: NSPoint(x: r.midX, y: r.midY + 3.5))
+                cross.lineWidth = 1.4; C.dim.setStroke(); cross.stroke()
+                return true
+            }
+            p.bg.setFill(); circle.fill()
+            if let second = p.bg2 { // dual-tone: the lower half in the second colour
+                NSGraphicsContext.saveGraphicsState()
+                NSBezierPath(rect: NSRect(x: r.minX, y: r.minY, width: r.width, height: r.height / 2)).addClip()
+                second.setFill(); circle.fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            p.accent.setFill()
+            NSBezierPath(ovalIn: NSRect(x: r.minX + 3, y: r.minY + 3, width: 6, height: 6)).fill()
+            p.green.setFill()
+            NSBezierPath(ovalIn: NSRect(x: r.maxX - 6, y: r.maxY - 6, width: 4.5, height: 4.5)).fill()
+            return true
+        }
+        img.isTemplate = false
+        return img
+    }
+
     @objc func pickTheme(_ item: NSMenuItem) {
         (NSApp.delegate as? AppDelegate)?.applyTheme(item.representedObject as? String ?? "ember", accent: nil, bg: nil)
     }
@@ -1258,11 +1340,11 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Custom theme"
-        alert.informativeText = "Background · card · accent (clock, strip, active letter) · break · text."
+        alert.informativeText = "Top and Bottom make a dual-tone card; leave them equal for a flat one.\nAccent = clock, strip, active letter. Then Card, Break, Text."
         let wells: [(String, NSColor)] = [
-            ("Background", C.bg), ("Card", C.card), ("Accent", C.accent), ("Break", C.green), ("Text", C.text),
+            ("Top", C.bg), ("Bottom", C.theme.bg2 ?? C.bg), ("Card", C.card), ("Accent", C.accent), ("Break", C.green), ("Text", C.text),
         ]
-        let box = NSView(frame: NSRect(x: 0, y: 0, width: 5 * 48, height: 62))
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 6 * 48, height: 62))
         var colorWells: [NSColorWell] = []
         for (i, (label, colour)) in wells.enumerated() {
             let well = NSColorWell(frame: NSRect(x: CGFloat(i) * 48, y: 26, width: 40, height: 24))
@@ -1278,8 +1360,8 @@ final class MenuBar: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Apply")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        d.applyTheme("custom", accent: colorWells[2].color, bg: colorWells[0].color,
-                     card: colorWells[1].color, breakc: colorWells[3].color, textc: colorWells[4].color)
+        d.applyTheme("custom", accent: colorWells[3].color, bg: colorWells[0].color, bg2: colorWells[1].color,
+                     card: colorWells[2].color, breakc: colorWells[4].color, textc: colorWells[5].color)
     }
 
     // Stats: "Reset today's stats" clears the tally after a one-click confirmation.
